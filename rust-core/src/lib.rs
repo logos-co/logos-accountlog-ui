@@ -6,6 +6,8 @@
 //! an account that is not made here.
 
 mod json;
+pub mod store;
 pub mod vault;
 
+pub use store::{Store, StoreError, DEFAULT_STORE_URL};
 pub use vault::{StoredAccount, Vault, VaultError};
