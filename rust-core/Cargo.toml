@@ -1,0 +1,33 @@
+[package]
+name = "logos_account_core"
+version = "0.1.0"
+edition = "2021"
+description = "The account write path as a linkable library: keys in a vault, the log they sign, and the store it is published to."
+license = "MIT OR Apache-2.0"
+# The module builder's rustc, so the MSRV-aware resolver picks dependency
+# versions it can compile.
+rust-version = "1.89"
+
+# Standalone crate: the empty table keeps cargo from adopting a parent workspace.
+[workspace]
+resolver = "3"
+
+[lib]
+name = "logos_account_core"
+# staticlib is what the plugin links; rlib is what the tests build against.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Not on logos-chat's main: the account crates live on PR #226, and #255 adds
+# the key import and export this vault is built around. Repinned when they land.
+account-log = { git = "https://github.com/logos-messaging/logos-chat.git", rev = "edf8ffd49d803a4432d331f57d18605940a30ae4" }
+eth-keystore = "0.5"
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zeroize = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
