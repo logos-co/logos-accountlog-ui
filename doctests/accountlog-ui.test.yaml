@@ -1,0 +1,185 @@
+name: "Writing an account log: a key, a name, an installation, one update"
+output: accountlog-ui.md
+project_name: logos-accountlog-ui
+release: ""
+
+intro: |
+  An account, in Logos, is not a row in a table. It is an append-only **log**
+  of entries, signed as a whole by one key, published under the address that
+  key derives. Nothing in it is ever deleted: retiring a name is itself an
+  entry, pointing at the one it retires.
+
+  `accountlog_ui` is the app that writes such a log. This doc-test builds it,
+  launches it headless through
+  [`logos-qt-mcp`](https://github.com/logos-co/logos-qt-mcp), and drives it the
+  way a person would: make a key, give the account a name, endorse an
+  installation, publish. The screenshot below is the real app at the end of that
+  run, and every number in it was measured by the app's own library rather than
+  written into this page.
+
+what_you_build: "A published account log with two entries, written by driving the real UI: an account key sealed with a password, a display name, and an endorsed installation key."
+
+what_you_learn:
+  - "Why an account is a log, and why nothing in it is ever removed"
+  - "What a staged edit is, and why a publish is all of them or none"
+  - "What each kind of entry costs the log's 128 KiB lifetime budget, and where that number comes from"
+  - "How a `ui_qml` Logos plugin is launched standalone and driven headless"
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+  - "**A Linux or macOS machine.** The app runs under `QT_QPA_PLATFORM=offscreen`, so no display is needed."
+  - "**No network account needed.** The run publishes to an in-process store."
+
+sections:
+  - title: "Build the app"
+    step: true
+    text: |
+      One flake output builds everything: the Rust library that decides what an
+      account may do, the C++ backend that marshals for it, and the QML the
+      person reads. The library is built inside this flake and handed to the
+      module builder as an external library, so the archive and the plugin that
+      links it are versioned by one commit.
+    steps:
+      - title: "Build the plugin"
+        run: "nix build 'github:logos-co/logos-accountlog-ui{release}' -o result"
+        code_block: "nix build 'github:logos-co/logos-accountlog-ui' -o result"
+
+      # Its own step on purpose. The harness dispatches file / run / ui_test /
+      # check_file as an if/elif chain, so a check_file sharing a step with a
+      # run: is never evaluated, and the build step would be proving only that
+      # nix exited 0.
+      - title: "The plugin really landed"
+        check_file: "result/lib/*accountlog_ui*plugin.{ext}"
+
+      - title: "What a Logos plugin is, on disk"
+        run: "ls result/lib"
+        expect_contains:
+          - "metadata.json"
+          - "qml"
+        post_text: |
+          `metadata.json` declares the plugin `type: ui_qml` and names its view;
+          `qml/` is the view itself; the shared library holds the backend. The
+          host reads the metadata, loads the library into an isolated `ui-host`
+          child process, and renders the QML in its own window.
+
+  - title: "Write an account log"
+    step: true
+    text: |
+      `nix run` on this flake launches the plugin inside
+      [`logos-standalone-app`](https://github.com/logos-co/logos-standalone-app),
+      the generic Qt host, built against the same design-system revision as the
+      plugin. Everything from here is the app driven through its own QML
+      surface: no test hooks, no back doors into the library.
+
+      The `walkthrough` app is what drives it. It launches the plugin headless
+      on an empty vault, makes a key sealed with a password, names the account,
+      publishes, endorses an installation key and publishes again. Every step is
+      finished when the app itself says so, and the picture is taken then, so
+      each one below is a state the app really reached.
+
+      Two things make that run hermetic. `LOGOS_ACCOUNTLOG_VAULT_DIR` puts the
+      key files in the run's own directory, so the walkthrough always starts
+      from an empty vault. `LOGOS_ACCOUNTLOG_STORE_URL=memory` selects the
+      in-process store: the route this app publishes through, chat-store's
+      `/v1/account`, is not merged yet, so there is nothing on the network to
+      publish to, and the in-process store enforces the same rule that route
+      does, that a log is accepted only where it extends the one already held.
+
+      There is nothing to manage until the module holds a key, so an empty vault
+      opens the door itself. The app writes accounts, so every account it holds
+      needs that account's signing key: it can make one, or take custody of one
+      made elsewhere.
+
+      ![An empty vault opens its own door](images/01-add-an-account.png)
+
+      A password seals this one account's key as an eth-keystore document;
+      without one the key is stored unsealed, and the screen says which at every
+      point where it matters. The choice is per account, not per module.
+
+      ![The password is the account's own choice](images/02-create-an-account.png)
+
+      The key now exists on this computer and the address is derived from it,
+      but the store has never heard of it. An update that stages no entry is
+      refused, so the address is claimed by the log's first entry and never by
+      an empty publish.
+
+      ![A key, and nothing published](images/03-nothing-published-yet.png)
+
+      Naming the account sends nothing. Edits collect as **entries**, numbered
+      as they will be once the update lands, and the bar prices the next publish
+      before it happens: 24 bytes for an empty display-name entry by the
+      format's own encoder, plus the four UTF-8 bytes of `Saro`.
+
+      ![The edit is staged, not written](images/04-one-pending-entry.png)
+
+      Entry `#0` is the name, written under `profile.displayname`. The whole log
+      was signed, not just the new entry, which is why a publish is all of the
+      staged entries or none of them.
+
+      ![The store serves the first entry](images/05-first-entry-published.png)
+
+      An endorsement costs 48 bytes whatever the key. Entry `#1` writes it under
+      `chat.signer`, and the live set replayed from the log now names one
+      installation. Entry `#0` is still there and still says `Saro`: the log
+      grew, nothing in it moved.
+
+      ![The account endorses an installation](images/06-installation-endorsed.png)
+    steps:
+      - title: "Write the log and show it"
+        ui_test:
+          setup:
+            - "nix build 'github:logos-co/logos-qt-mcp' --no-write-lock-file -o result-mcp"
+          qt_mcp: "result-mcp"
+          # Opens the default inspector port 3768: the qt-mcp test framework
+          # always connects to QML_INSPECTOR_PORT (default 3768), so the captured
+          # window must be reachable there. The walkthrough runs on its own
+          # inspector port (4768) during this (unbounded) launch wait; 3768 opens,
+          # proxied onto the live window, only once the log is published, so the
+          # capture below runs against the already-finished window.
+          launch: "nix run 'github:logos-co/logos-accountlog-ui{release}#walkthrough'"
+          launch_timeout: 1800
+          tests:
+            - name: "The account log, written and published"
+              action: wait_for
+              # The inspector's findByProperty matches the whole `text` property
+              # and walks the tree whether or not an item is on screen, so an
+              # assertion is only worth making on a string nothing else renders.
+              # These four are the log table's own cells plus the count replayed
+              # from them, so they hold only where a row was really drawn.
+              # `Saro` and `chat.signer` would not do: the switcher carries the
+              # name, and the Installations panel names the context in its own
+              # help line whether or not anything was endorsed.
+              texts: ["#1", "profile.displayname", "48", "1 live"]
+              timeout: 90000
+              text: |
+                The same log, captured by this run rather than by the one the
+                pictures above came from: the `walkthrough` app holds the
+                finished window open, and this step attaches to it and reads the
+                log's own cells back. The meter reads what the two entries spent
+                against the format's 128 KiB cap, and every number in it was
+                measured by encoding the entry with the format's own encoder.
+              screenshot: "accountlog.png"
+
+  - title: "What the log now is"
+    text: |
+      Two entries, 93 bytes of signed payload: a 17-byte domain prefix that
+      every account log leads with, 28 for the name, 48 for the endorsement.
+      The format caps the payload at 128 KiB, and that cap is a **lifetime**
+      budget, because nothing is ever removed to make room. Retiring this name
+      later costs 7 more bytes for the removal plus the new name's own.
+
+      That is why the app quotes a price before it stages an edit, and why every
+      one of those numbers is measured by encoding the entry with the format's
+      own encoder rather than recomputed here. A screen that disagreed with the
+      encoder would be a screen that lies about how much life the account has
+      left.
+
+      The store this run published to was in-process. The same bytes go to
+      chat-store once its `/v1/account` route is deployed; nothing above
+      changes, because the service stores the very artifact the app signs.

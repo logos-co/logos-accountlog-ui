@@ -81,6 +81,40 @@
           };
         };
       };
+
+      # `nix run .#walkthrough`: write a whole account log headless -- make a
+      # key, name the account, endorse an installation, publish -- and hold the
+      # finished window open. It captures the numbered screenshots in
+      # doctests/images on the way through, and the doc-test launches it to
+      # capture one shot of the published log (see doctests/accountlog-ui.test.yaml).
+      # APP_BIN is this flake's standalone runner; the driver scripts are
+      # bundled from ./doctests/walkthrough.
+      walkthroughRunner = system:
+        let pkgs = import logos-module-builder.inputs.nixpkgs { inherit system; };
+        in pkgs.writeShellApplication {
+          name = "accountlog-ui-walkthrough";
+          runtimeInputs = with pkgs; [ nodejs coreutils util-linux procps bash ];
+          text = ''
+            export APP_BIN="${base.apps.${system}.default.program}"
+            exec bash ${./doctests/walkthrough}/run-walkthrough-show.sh "$@"
+          '';
+        };
+
+      # x86_64-windows is the builder's cross pseudo-system: nixpkgs has no such
+      # package set, and there is nothing here to run a headless walkthrough on,
+      # so it gets the base outputs unchanged.
+      runnable = system: lib.hasSuffix "-linux" system || lib.hasSuffix "-darwin" system;
+
+      withWalkthrough = attr: entry: builtins.mapAttrs
+        (system: outputs:
+          if runnable system then outputs // { walkthrough = entry system; } else outputs)
+        attr;
     in
-    base;
+    base // {
+      apps = withWalkthrough base.apps
+        (system: { type = "app"; program = "${walkthroughRunner system}/bin/accountlog-ui-walkthrough"; });
+      # Also a package so `nix build .#walkthrough` resolves: the doc-test runner
+      # pre-builds its launch target that way to warm the store before the run.
+      packages = withWalkthrough base.packages walkthroughRunner;
+    };
 }

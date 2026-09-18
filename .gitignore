@@ -8,3 +8,8 @@ generated_code/
 
 rust-core/target/
 build/
+
+# What the walkthrough captures. The tutorial's figures are served from the
+# published report, laid down there by CI from the run that took them, so a
+# copy in the tree would only ever be a stale second one.
+doctests/images/
