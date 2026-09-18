@@ -1,0 +1,101 @@
+// The QtRO view contract for the account log app.
+//
+// Two rules shape everything below.
+//
+// FIRST: every slot returns void. A slot with a return value reaches QML as a
+// QRemoteObjectPendingReply, which the view can only read by handing it to the
+// bridge, and which blocks nothing useful in the meantime. Two of the calls
+// behind these slots reach the network. So a slot here is a request, and the
+// answer arrives as a property change or a signal, which is what the view
+// renders from anyway.
+//
+// SECOND: the tables cross as JSON text rather than as a remoted model. The
+// backend holds nothing the library does not already hold, so a model here
+// would be a second copy of the log with its own staleness. The log is bounded
+// at 128 KiB by the format, so the whole of it fits in one property.
+//
+// Secrets cross this contract deliberately: a password on four slots, and the
+// account's own secret on importAccount and accountExported. The view runs in
+// the host process and this backend in the ui-host child the host spawns for
+// it, so each crosses the one local socket between them and no other. The
+// library the backend calls makes no IPC call, so none of it reaches the
+// module bus.
+
+class AccountLog
+{
+    // Where publishing goes, for the store strip to name.
+    PROP(QString storeUrl="" READONLY)
+    // One line of plain status: what the app is doing, or last did.
+    PROP(QString statusText="Starting" READONLY)
+    // Why the last read of the store failed; empty once one succeeds.
+    PROP(QString storeProblem="" READONLY)
+    // Why the vault could not be listed, or the selected account read from it;
+    // empty once it can.
+    PROP(QString vaultProblem="" READONLY)
+    // True while a call is in flight. Guards the buttons: the two calls that
+    // reach the store take as long as the store takes.
+    PROP(bool busy=false READONLY)
+
+    // Every account the vault holds:
+    //   [{address, protected, resolved, displayName, pending}]
+    PROP(QString accountsJson="[]" READONLY)
+
+    // The account on screen. Empty when the vault holds none.
+    PROP(QString selectedAddress="" READONLY)
+
+    // Everything the Manage pane draws for the selected account. See
+    // account_core.h for the shape; empty object when nothing is selected.
+    PROP(QString stateJson="{}" READONLY)
+
+    // The first index the last publish wrote, so the entries it added can be
+    // marked as such. -1 once the store is read again or another account is
+    // selected, since what follows it may then be another device's.
+    PROP(int firstNewIndex=-1 READONLY)
+
+    // The banner across the foot of the log: "success", "info", "error", or
+    // empty.
+    PROP(QString noticeKind="" READONLY)
+    PROP(QString noticeTitle="" READONLY)
+    PROP(QString noticeBody="" READONLY)
+
+    // Re-read the vault, and the store for the selected account.
+    SLOT(void refresh())
+    // Put an account on screen and read its log.
+    SLOT(void selectAccount(QString address))
+
+    // Make a key on this computer. An empty password means the account chooses
+    // none, and its key is then stored unsealed.
+    SLOT(void createAccount(QString password))
+    // Take custody of an account made elsewhere, from its 32-byte secret.
+    SLOT(void importAccount(QString secretHex, QString password))
+    // Hand the account's own secret back, once, through accountExported.
+    SLOT(void exportAccount(QString address, QString password))
+    // Drop the account and its key. Nothing here can recover it.
+    SLOT(void forgetAccount(QString address))
+
+    // Stage an edit against the selected account. Nothing is written until
+    // publish, and one rejected entry writes none of them.
+    SLOT(void stageAddInstallation(QString keyHex))
+    SLOT(void stageSetDisplayName(QString name))
+    SLOT(void stageRevoke(int index))
+    SLOT(void discardPending())
+
+    // Sign and send the staged entries as one update. The password is this
+    // account's, and is used for this publish only.
+    SLOT(void publish(QString password))
+
+    SLOT(void dismissNotice())
+
+    // The secret of `address`, in answer to exportAccount. Fires once, and the
+    // value is the account: whoever holds it can write this log.
+    SIGNAL(accountExported(QString address, QString key))
+    // A publish wrote entries, the first at `firstNewIndex`. Not raised for a
+    // publish that found every staged edit already in the store.
+    SIGNAL(published(QString address, int firstNewIndex))
+    // A call failed. `what` names the call, for a view that wants to place the
+    // message beside the control that made it.
+    SIGNAL(failed(QString what, QString message))
+    // A call succeeded: the pair of `failed`, so a sheet waiting on one call
+    // knows when to close.
+    SIGNAL(succeeded(QString what))
+}

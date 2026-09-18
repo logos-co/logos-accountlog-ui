@@ -1,1 +1,10 @@
+result
+result-*
+.direnv
+
+# Written into the source tree by the builder: logos-view-generator emits the
+# interface and glue here in preConfigure, so it is output, not source.
+generated_code/
+
 rust-core/target/
+build/

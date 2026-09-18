@@ -1,0 +1,38 @@
+{
+  "name": "accountlog_ui",
+  "display_name": "Account Log",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "interface": "universal",
+  "category": "general",
+  "description": "Manage an account log: the keys it endorses, the name it publishes, and the store it is published to.",
+  "main": "accountlog_ui_plugin",
+  "icon": "src/icons/accountlog_ui.png",
+  "view": "qml/AccountLogView.qml",
+
+  "dependencies": [],
+
+  "codegen": {
+    "rep": "src/accountlog_ui.rep",
+    "backend_class": "AccountLogBackend",
+    "backend_header": "AccountLogBackend.h"
+  },
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": ["qt6.qtdeclarative"]
+    },
+    "external_libraries": [
+      {
+        "name": "logos_account_core"
+      }
+    ],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
