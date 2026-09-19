@@ -89,9 +89,7 @@ wait_for_port() {
 }
 
 # An empty vault and the in-process store: the walkthrough always starts from
-# no account, and the route this app publishes through, chat-store's
-# /v1/account, is not merged yet, so there is nothing on the network to
-# publish to.
+# no account, needs no network, and leaves nothing on devnet.
 mkdir -p "$WORK_DIR/vault"
 QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
   QML_INSPECTOR_PORT="$APP_PORT" \

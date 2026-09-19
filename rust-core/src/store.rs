@@ -17,8 +17,8 @@ use account_log::{AccountAddr, SignedAccountLog, MAX_PAYLOAD_BYTES};
 use serde::Deserialize;
 use thiserror::Error;
 
-/// The devnet service the chat team runs. Overridable, because the route this
-/// client calls lands there after this app does.
+/// The devnet service the chat team runs, used unless the caller names
+/// another store.
 pub const DEFAULT_STORE_URL: &str = "https://devnet.chat-kc.logos.co";
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);

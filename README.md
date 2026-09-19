@@ -53,8 +53,10 @@ eth-keystore v3 document) or in the clear, by that account's own choice. It
 lives under `GenericDataLocation/logos/accountlog-ui/vault`, which
 `LOGOS_ACCOUNTLOG_VAULT_DIR` overrides.
 
-`LOGOS_ACCOUNTLOG_STORE_URL` points the app at another store. The literal
-`memory` selects an in-process store, for a run with no network.
+By default the app publishes to chat-store on devnet,
+`https://devnet.chat-kc.logos.co`. `LOGOS_ACCOUNTLOG_STORE_URL` points it at
+another store. The literal `memory` selects an in-process store, for a run with
+no network.
 
 ## Documentation
 
@@ -79,11 +81,10 @@ CI runs it on every push and publishes the two-column report, the tutorial
 beside the commands that actually ran, to
 <https://logos-co.github.io/logos-accountlog-ui/>.
 
-It runs against the in-process store, so it needs nothing on the network: the
-route it publishes through, chat-store's `/v1/account`
-(logos-messaging/chat-store#8), is not merged yet, and the in-process store
-enforces the rule that route does (a log is accepted only where it extends the
-one held).
+It runs against the in-process store, so it needs nothing on the network and
+leaves nothing on devnet, where a published log cannot be deleted. The
+in-process store enforces the rule chat-store's `/v1/account` route does: a log
+is accepted only where it extends the one held.
 
 ## Building
 
