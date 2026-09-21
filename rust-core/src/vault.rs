@@ -398,13 +398,13 @@ fn check_params(json: &str) -> Result<(), VaultError> {
 }
 
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_: &Path, _: u32) -> io::Result<()> {
+pub(crate) fn set_mode(_: &Path, _: u32) -> io::Result<()> {
     Ok(())
 }
 
