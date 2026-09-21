@@ -8,13 +8,19 @@ each account's log into the live set that log describes, stages edits as
 pending entries, and sends them to chat-storage as a single update: every entry
 is applied, or none is.
 
+It also reads accounts it holds no key for. An **observed** account is an
+address and nothing else: whatever the store serves under it, verified against
+it, on the same screen with every control that needs a key taken out. Both
+kinds are in one switcher, the managed ones first.
+
 What the current pane does, in full:
 
 - endorse an installation's public key under `chat.signer`, and revoke one;
 - set the account's display name under `profile.displayname`, which is a
   revocation of the live name and an addition of the new one;
 - publish the staged entries, signing the whole log;
-- create an account, import one made elsewhere, export its key, forget it.
+- create an account, import one made elsewhere, export its key, forget it;
+- observe an account by address, read its log, and stop.
 
 A password is per account, not per module: an account can be sealed with one,
 or stored unsealed, and the screen says which at every point where it matters.
@@ -23,7 +29,7 @@ or stored unsealed, and the screen says which at every point where it matters.
 
 | Path | What it is |
 |---|---|
-| `rust-core/` | Everything the app decides. Vault, store client, staging rules, and the C ABI. Builds as a static archive. |
+| `rust-core/` | Everything the app decides. Vault, observed accounts, store client, staging rules, and the C ABI. Builds as a static archive. |
 | `include/account_core.h` | That library's C header, and the reference for the JSON it answers with. |
 | `src/accountlog_ui.rep` | The QtRO contract between the backend and the view. |
 | `src/AccountLogBackend.{h,cpp}` | The backend: marshals view calls onto a worker thread and publishes the results as properties. |
@@ -53,6 +59,11 @@ eth-keystore v3 document) or in the clear, by that account's own choice. It
 lives under `GenericDataLocation/logos/accountlog-ui/vault`, which
 `LOGOS_ACCOUNTLOG_VAULT_DIR` overrides.
 
+The observed accounts are one file in that same directory, `observed.json`: a
+list of addresses and nothing else, since an account with no key here has
+nothing to seal. One directory is this app's data, whether or not a given
+account in it has a key.
+
 By default the app publishes to chat-store on devnet,
 `https://devnet.chat-kc.logos.co`. `LOGOS_ACCOUNTLOG_STORE_URL` points it at
 another store. The literal `memory` selects an in-process store, for a run with
@@ -62,7 +73,8 @@ no network.
 
 The tutorial is executable. `doctests/accountlog-ui.test.yaml` builds the app,
 launches it headless in `logos-standalone-app` and drives the real QML surface:
-make a key, name the account, endorse an installation, publish. Every figure it
+make a key, name the account, endorse an installation, publish, then give a
+second account's key up and read its log from the outside. Every figure it
 shows was measured by the app's own library during that run.
 
 ```sh

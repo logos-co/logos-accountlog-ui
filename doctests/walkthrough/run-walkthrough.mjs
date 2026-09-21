@@ -139,8 +139,18 @@ async function confirm(insp, sheet) {
   if (refused) throw new Error(`${sheet} was refused: ${refused}`);
 }
 
+// The roster is behind the bar that names the account, which is the one
+// control on this screen that is not a button.
+async function openSwitcher(insp) {
+  await click(insp, "switcherBar");
+  await waitUntil(insp, "switcher.open", true);
+}
+
 const PASSWORD = "a long quiet sentence";
 const DISPLAY_NAME = "Saro";
+// The second account, whose key this run gives up so that the first can watch
+// it from the outside.
+const OTHER_NAME = "Raya";
 // A real Ed25519 public key: the log checks that an endorsed key is a point on
 // the curve, so an invented one is refused on the way in.
 const INSTALLATION_KEY = "50493a4f65e5bbb98b68c4f9608dfa860a975c31c3b6db40b61958af345a6fce";
@@ -235,6 +245,72 @@ async function main() {
   await waitUntil(app, "store.installations.length", 1);
   console.log("  the log now endorses one installation");
   await shoot(app, outDir, "06-installation-endorsed.png");
+
+  // An account this module reads and cannot write needs a log published by a
+  // key held somewhere else. A hermetic run has no somewhere else, so it makes
+  // one here and then gives the key up: what stays behind is a log in the
+  // store that this module can never extend, which is what observing is.
+  console.log("publish a second account...");
+  await openSwitcher(app);
+  await click(app, "addAccountButton");
+  await waitUntil(app, "view.activeScreen", "add");
+  await click(app, "createAccountDoorAction");
+  await waitUntil(app, "view.activeScreen", "create");
+  await type(app, "createPasswordField", PASSWORD);
+  await type(app, "createPasswordConfirmField", PASSWORD);
+  await waitUntil(app, "createScreen.valid", true);
+  await click(app, "createAccountSubmit");
+  await waitFor(async () => {
+    const at = await evalq(app, "store.address");
+    return at !== "" && at !== address;
+  }, { timeout: 60000, what: "the second account to be created" });
+  const observed = await evalq(app, "store.address");
+  await waitUntil(app, "store.resolved", true);
+  await expectNoError(app, "create the second account");
+  console.log(`  second account: ${observed}`);
+
+  await click(app, "displayNameButton");
+  await waitUntil(app, "displayNameSheet.visible", true);
+  await type(app, "displayNameField", OTHER_NAME);
+  await confirm(app, "displayNameSheet");
+  await waitUntil(app, "store.pending.length", 1);
+  await publish(app);
+  await waitUntil(app, "store.entries.length", 1, { timeout: 60000 });
+  await expectNoError(app, "publish the second account");
+
+  console.log("give up its key, keeping the log the store holds...");
+  await click(app, "forgetAccountButton");
+  await waitUntil(app, "forgetAccountSheet.visible", true);
+  await confirm(app, "forgetAccountSheet");
+  await waitUntil(app, "store.address", address, { timeout: 60000 });
+  await waitUntil(app, "store.accounts.length", 1);
+
+  console.log("observe it from the outside...");
+  await openSwitcher(app);
+  await click(app, "observeAccountButton");
+  await waitUntil(app, "observeAccountSheet.visible", true);
+  await type(app, "observeAddressField", observed);
+  await confirm(app, "observeAccountSheet");
+  await waitUntil(app, "store.address", observed, { timeout: 60000 });
+  await waitUntil(app, "store.observing", true);
+  // The address was taken on without reading anything, and the read that
+  // follows is what puts a log on the screen.
+  await waitUntil(app, "store.resolved", true, { timeout: 60000 });
+  await expectNoError(app, "observe the account");
+  const served = await evalq(app, "store.publishedName");
+  if (served !== OTHER_NAME) throw new Error(`the store serves the observed name as ${JSON.stringify(served)}`);
+  await waitUntil(app, "store.entries.length", 1);
+  if (await evalq(app, "store.managed")) throw new Error("an account with no key here is shown as managed");
+  console.log(`  reading ${OTHER_NAME}'s log with no key for it`);
+  await shoot(app, outDir, "07-an-observed-account.png");
+
+  // Stopping drops the account and what was read with it, and leaves the
+  // account this module does hold on screen.
+  console.log("stop observing...");
+  await click(app, "stopObservingButton");
+  await waitUntil(app, "store.address", address, { timeout: 60000 });
+  await waitUntil(app, "store.accounts.length", 1);
+  await waitUntil(app, "store.entries.length", 2);
 
   const logBytes = await evalq(app, "store.logBytes");
   console.log(`\nWALKTHROUGH COMPLETE: 2 entries, ${logBytes} bytes of signed payload; screenshots in ${outDir}`);

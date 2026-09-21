@@ -5,7 +5,7 @@
   "type": "ui_qml",
   "interface": "universal",
   "category": "general",
-  "description": "Manage an account log: the keys it endorses, the name it publishes, and the store it is published to.",
+  "description": "Manage an account log: the keys it endorses, the name it publishes, and the store it is published to. Reads accounts whose key is elsewhere.",
   "main": "accountlog_ui_plugin",
   "icon": "src/icons/accountlog_ui.png",
   "view": "qml/AccountLogView.qml",
