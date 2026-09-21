@@ -367,6 +367,44 @@ void AccountLogBackend::forgetAccount(QString address)
          });
 }
 
+void AccountLogBackend::observeAccount(QString address)
+{
+    // The core takes an address in one spelling only, so what it was asked
+    // about is what goes on screen: a selection in any other spelling would
+    // never match the state that comes back.
+    const QString addr = address.trimmed();
+    const QByteArray target = utf8(addr);
+    call(QStringLiteral("observeAccount"),
+         [target](LogosAccountCore *core) {
+             return logos_account_core_observe_account(core, target.constData());
+         },
+         [this, addr](const QJsonObject &reply) {
+             setSelection(addr);
+             if (reply.value(QStringLiteral("alreadyObserved")).toBool())
+                 setNotice(QStringLiteral("info"), QStringLiteral("Already observed"),
+                           QStringLiteral("This account is already one this app reads, so it is "
+                                          "shown as it was."));
+             reloadAccounts();
+             reloadState();
+             refresh();
+         });
+}
+
+void AccountLogBackend::stopObserving(QString address)
+{
+    const QByteArray target = utf8(address);
+    call(QStringLiteral("stopObserving"),
+         [target](LogosAccountCore *core) {
+             return logos_account_core_stop_observing(core, target.constData());
+         },
+         [this, address](const QJsonObject &) {
+             m_dropped.remove(address);
+             if (address == selectedAddress())
+                 setSelection(QString());
+             reloadAccounts();
+         });
+}
+
 void AccountLogBackend::stageAddInstallation(QString keyHex)
 {
     const QByteArray address = utf8(selectedAddress());

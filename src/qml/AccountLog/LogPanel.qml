@@ -40,7 +40,12 @@ Panel {
                     font.pixelSize: Theme.typography.subtitleText
                     font.weight: Theme.typography.weightBold
                 }
-                Badge { text: Fmt.entries(root.store.entries.length) }
+                // A count of nothing is not the same claim as no count: an
+                // account whose log was never read has neither.
+                Badge {
+                    visible: root.store.resolved
+                    text: Fmt.entries(root.store.entries.length)
+                }
                 Badge {
                     visible: root.store.pending.length > 0
                     tone: "pending"
@@ -51,18 +56,25 @@ Panel {
                     tone: "error"
                     text: qsTr("Partly unreadable")
                 }
+                Badge {
+                    visible: root.store.observing
+                    text: qsTr("Read only")
+                }
             }
 
             HelpText {
                 Layout.fillWidth: true
-                body: qsTr("Every entry in order. Nothing is deleted: a removal is an entry too.")
+                body: root.store.managed
+                      ? qsTr("Every entry in order. Nothing is deleted: a removal is an entry too.")
+                      : qsTr("Every entry in order, exactly as the store serves it.")
             }
         }
 
         Meter {
             Layout.preferredWidth: 220
-            // Not a size until the account's state has landed.
-            opacity: root.store.loading ? 0 : 1
+            // Not a size until the account's state has landed, and not one at
+            // all where no log was read: an unread account is not an empty one.
+            opacity: root.store.loading || !root.store.resolved ? 0 : 1
             used: root.store.logBytes
             limit: root.store.maxBytes
         }
@@ -93,14 +105,22 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
             text: root.store.loading
                   ? qsTr("Reading this account.")
-                  : !root.store.resolved && root.store.storeProblem !== ""
+                  : root.store.reading === "unverified"
+                  ? qsTr("Nothing is shown: the log the store served does not verify under this address.")
+                  : root.store.reading === "forked"
+                  ? qsTr("Nothing is shown: the store serves a log that does not extend the one already read.")
+                  : root.store.reading === "unanswered"
                   ? qsTr("The store could not be read, so whether this account published anything is not known yet: %1")
                         .arg(root.store.storeProblem)
-                  : !root.store.resolved
+                  : root.store.reading === "unread"
                   ? qsTr("This account's log has not been read from the store yet.")
-                  : root.store.published
-                  ? qsTr("No entries yet. Every change appends one here, and nothing is ever taken out.")
-                  : qsTr("Nothing published yet. This account has claimed no address in the store.")
+                  : !root.store.published && root.store.observing
+                  ? qsTr("The store has nothing under this address.")
+                  : !root.store.published
+                  ? qsTr("Nothing published yet. This account has claimed no address in the store.")
+                  : root.store.observing
+                  ? qsTr("The store holds this address with an empty log.")
+                  : qsTr("No entries yet. Every change appends one here, and nothing is ever taken out.")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: Theme.palette.textTertiary
@@ -108,8 +128,17 @@ Panel {
         HelpText {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            visible: root.store.resolved && !root.store.published
-            body: qsTr("The address is claimed by the first publish, and there is nothing to publish yet.")
+            visible: root.store.reading === "unverified"
+                     || (root.store.resolved && !root.store.loading)
+            body: root.store.reading === "unverified"
+                  ? qsTr("One signature covers the whole log, so none of it can be trusted in part.")
+                  : root.store.published && root.store.observing
+                  ? qsTr("The account was claimed by publishing, and has said nothing since.")
+                  : root.store.published
+                  ? qsTr("Publishing an empty log is still a publish: it claims the address.")
+                  : root.store.observing
+                  ? qsTr("Either the account has never published, or it publishes to a different store.")
+                  : qsTr("The address is claimed by the first publish, and there is nothing to publish yet.")
         }
     }
 
@@ -160,12 +189,34 @@ Panel {
         say: root.store.backend.statusText
         problem: root.store.storeProblem
         busy: root.store.busy
+        readAtMs: root.store.readAtMs
         onRetryRequested: root.store.backend.refresh()
     }
 
     PendingBar {
         Layout.fillWidth: true
+        visible: root.store.managed
         store: root.store
         onPublishRequested: root.publishRequested()
+    }
+
+    // The foot of the log says what the next update will send. For an account
+    // held elsewhere there is no next update, and saying so is what keeps the
+    // panel from reading as one whose Publish button failed to draw.
+    ColumnLayout {
+        Layout.fillWidth: true
+        visible: root.store.observing
+        spacing: 2
+
+        LogosText {
+            text: qsTr("Nothing to publish here")
+            textFormat: Text.PlainText
+            font.weight: Theme.typography.weightMedium
+            color: Theme.palette.textTertiary
+        }
+        HelpText {
+            Layout.fillWidth: true
+            body: qsTr("Writing this log needs this account's key, which is held somewhere else.")
+        }
     }
 }

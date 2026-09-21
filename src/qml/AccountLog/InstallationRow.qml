@@ -16,6 +16,8 @@ Rectangle {
     // A staged revocation points at this entry.
     property bool leaving: false
     property bool current: false
+    // False where this module cannot write the log the key is endorsed in.
+    property bool removable: true
 
     signal clicked()
     signal removeRequested()
@@ -78,7 +80,7 @@ Rectangle {
         }
         LogosIconButton {
             Layout.alignment: Qt.AlignVCenter
-            visible: !root.pending && !root.leaving
+            visible: root.removable && !root.pending && !root.leaving
             // The key beside it is what the row is about, and a labelled
             // button here would be wider than the key.
             Accessible.name: qsTr("Remove this installation")

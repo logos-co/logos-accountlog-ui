@@ -36,8 +36,8 @@ class AccountLog
     // reach the store take as long as the store takes.
     PROP(bool busy=false READONLY)
 
-    // Every account the vault holds:
-    //   [{address, protected, resolved, displayName, pending}]
+    // Every account this app has, the ones it holds a key for first:
+    //   [{address, managed, protected, resolved, displayName, pending, problem}]
     PROP(QString accountsJson="[]" READONLY)
 
     // The account on screen. Empty when the vault holds none.
@@ -72,6 +72,12 @@ class AccountLog
     SLOT(void exportAccount(QString address, QString password))
     // Drop the account and its key. Nothing here can recover it.
     SLOT(void forgetAccount(QString address))
+
+    // Take on an account whose key is elsewhere, reading its log and never
+    // writing it.
+    SLOT(void observeAccount(QString address))
+    // Stop reading that account. What was read goes with it.
+    SLOT(void stopObserving(QString address))
 
     // Stage an edit against the selected account. Nothing is written until
     // publish, and one rejected entry writes none of them.

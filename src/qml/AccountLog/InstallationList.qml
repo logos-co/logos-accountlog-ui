@@ -38,7 +38,12 @@ Panel {
             font.pixelSize: Theme.typography.subtitleText
             font.weight: Theme.typography.weightBold
         }
-        Badge { text: qsTr("%1 live").arg(root.store.installations.length) }
+        // No log read means no live set, which is not the same claim as a
+        // live set with nothing in it.
+        Badge {
+            visible: root.store.resolved
+            text: qsTr("%1 live").arg(root.store.installations.length)
+        }
         Badge {
             visible: root.arriving.length > 0
             tone: "pending"
@@ -47,6 +52,7 @@ Panel {
         Item { Layout.fillWidth: true }
         LogosButton {
             objectName: "addInstallationButton"
+            visible: root.store.managed
             text: qsTr("Add installation")
             variant: LogosButton.Variant.Primary
             enabled: !root.store.busy && root.store.unreadable === ""
@@ -56,6 +62,9 @@ Panel {
 
     RowLayout {
         Layout.fillWidth: true
+        // The sentence is about what this module writes, and it writes
+        // nothing here: what an observed account endorses is its own doing.
+        visible: root.store.managed
         spacing: Theme.spacing.tiny
 
         HelpText { body: qsTr("Keys live under") }
@@ -95,6 +104,7 @@ Panel {
                 entryIndex: modelData.index
                 keyHex: modelData.key
                 leaving: root.store.willBeRevoked(modelData.index)
+                removable: root.store.managed
                 current: root.selectedIndex === modelData.index
                 onClicked: root.selected(modelData.index)
                 onRemoveRequested: root.store.backend.stageRevoke(modelData.index)
@@ -110,7 +120,11 @@ Panel {
 
         LogosText {
             Layout.fillWidth: true
-            text: qsTr("No installations yet.")
+            // An account whose log has not been read has no installations to
+            // show, which is a different thing from one that endorses none.
+            text: root.store.resolved ? qsTr("No installations yet.")
+                : root.store.reading === "unread" ? qsTr("Nothing read yet.")
+                : qsTr("Nothing to show.")
             textFormat: Text.PlainText
             horizontalAlignment: Text.AlignHCenter
             color: Theme.palette.textTertiary
@@ -118,7 +132,13 @@ Panel {
         HelpText {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            body: qsTr("Add the public key of a chat installation to endorse it.")
+            body: root.store.resolved && root.store.managed
+                  ? qsTr("Add the public key of a chat installation to endorse it.")
+                  : root.store.resolved
+                  ? qsTr("This account endorses no installation key.")
+                  : root.store.reading === "unread"
+                  ? qsTr("Installations appear once this account's log has been read.")
+                  : qsTr("Installations are read from the log, and there is no log here.")
         }
     }
 }

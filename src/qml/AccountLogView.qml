@@ -7,12 +7,13 @@ import Logos.Controls
 
 import AccountLog
 
-// The Manage pane: the account this module holds a key for, the live set
-// replayed from its log, and the log itself.
+// The account the switcher names, the live set replayed from its log, and the
+// log itself. One screen serves both kinds of account: an account this module
+// holds the key for is the whole of it, and one it only observes is the same
+// screen with every control that needs a key taken out.
 //
-// One screen at a time, chosen by what the vault holds and what the person
-// last asked for. The pane tabs the mockup draws belong to a second pane that
-// only reads, and there is nothing to switch to until it exists.
+// One screen at a time, chosen by what this module has and what the person
+// last asked for.
 Item {
     id: view
 
@@ -46,11 +47,13 @@ Item {
             store.ready = true
     }
 
-    // "manage" | "add" | "create" | "import", as last asked for.
+    // "manage" | "add" | "create" | "import", as last asked for. Observing
+    // is a sheet rather than a screen: it asks for one address, and the
+    // account it takes on is on screen as soon as it answers.
     property string screen: "manage"
 
-    // What is actually drawn: there is nothing to manage until the vault holds
-    // an account, so an empty vault opens the door itself.
+    // What is actually drawn: there is nothing to show until this module has
+    // an account of either kind, so a first run opens the door itself.
     readonly property string activeScreen:
         screen === "manage" && !hasAccounts ? "add" : screen
 
@@ -59,8 +62,9 @@ Item {
 
     readonly property bool hasAccounts: store.accounts.length > 0
 
-    // A screen is drawn from what the vault holds, so none is while it cannot
-    // be read: an empty listing would read as a vault that holds nothing.
+    // A screen is drawn from the accounts this module has, so none is while
+    // the vault cannot be read: an empty listing would read as a module that
+    // has none.
     readonly property bool usable: store.ready && store.vaultProblem === ""
 
     Connections {
@@ -97,7 +101,7 @@ Item {
             if (store.ready)
                 return
             for (const sheet of [addInstallationSheet, displayNameSheet, publishSheet,
-                                 exportKeySheet, forgetSheet])
+                                 exportKeySheet, forgetAccountSheet, observeAccountSheet])
                 sheet.close()
         }
     }
@@ -141,7 +145,7 @@ Item {
         }
     }
 
-    // Nothing to manage until the vault holds an account, so the door is the
+    // Nothing to show until this module has an account, so the door is the
     // whole screen rather than an empty two-column layout.
     AddAccountScreen {
         objectName: "addAccountScreen"
@@ -155,6 +159,10 @@ Item {
         onImportRequested: {
             importScreen.reset()
             view.screen = "import"
+        }
+        onObserveRequested: {
+            observeAccountSheet.open()
+            observeAccountSheet.reset()
         }
         onCancelled: view.screen = "manage"
     }
@@ -201,9 +209,14 @@ Item {
             // Outside the scroll view below, so the bar naming the account
             // stays put while the panels under it scroll.
             SwitcherBar {
+                id: switcher
                 Layout.fillWidth: true
                 store: store
                 onAddAccountRequested: view.screen = "add"
+                onObserveAccountRequested: {
+                    observeAccountSheet.open()
+                    observeAccountSheet.reset()
+                }
             }
 
             LogosScrollView {
@@ -231,7 +244,7 @@ Item {
                             exportKeySheet.open()
                             exportKeySheet.reset()
                         }
-                        onForgetRequested: forgetSheet.open()
+                        onForgetRequested: forgetAccountSheet.open()
                     }
 
                     InstallationList {
@@ -300,7 +313,18 @@ Item {
     }
 
     ForgetAccountSheet {
-        id: forgetSheet
+        id: forgetAccountSheet
         store: store
+    }
+
+    ObserveAccountSheet {
+        id: observeAccountSheet
+        store: store
+        // Selecting an account already on screen changes nothing and says
+        // nothing, so the screen this was opened from is left behind here.
+        onOpenRequested: (address) => {
+            store.backend.selectAccount(address)
+            view.screen = "manage"
+        }
     }
 }
