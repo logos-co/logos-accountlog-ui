@@ -4,11 +4,10 @@ import QtQuick
 import QtQuick.Layouts
 
 import Logos.Theme
-import Logos.Controls
 
-// The log itself: the domain it opens with, every entry in order, and the
-// entries the next publish will append. Nothing is ever taken out, so a
-// removal is a row like any other and what it removed stays above it.
+// The log itself: every entry in order, and the entries the next publish
+// will append. Nothing is ever taken out, so a removal is a row like any
+// other and what it removed stays above it.
 ColumnLayout {
     property var store: null
     property int selectedIndex: -1
@@ -76,42 +75,6 @@ ColumnLayout {
         Layout.fillWidth: true
         implicitHeight: 1
         color: Theme.palette.borderSubtle
-    }
-
-    // The domain is not an entry and has no index, but it is bytes the
-    // signature covers, so it is shown where those bytes are counted.
-    RowLayout {
-        Layout.fillWidth: true
-        Layout.leftMargin: root.widths.rowMargin
-        Layout.rightMargin: root.widths.rowMargin
-        Layout.topMargin: Theme.spacing.tiny
-        Layout.bottomMargin: Theme.spacing.tiny
-        spacing: Theme.spacing.small
-
-        Item { Layout.preferredWidth: root.widths.index }
-
-        LogosText {
-            text: "logos:accounts:1"
-            textFormat: Text.PlainText
-            font.family: Theme.typography.mono
-            font.pixelSize: Theme.typography.secondaryText
-            color: Theme.palette.textSecondary
-        }
-
-        HelpText {
-            Layout.fillWidth: true
-            body: qsTr("domain, covered by the one signature over the whole log")
-        }
-
-        LogosText {
-            Layout.preferredWidth: root.widths.bytes
-            horizontalAlignment: Text.AlignRight
-            text: root.store.domainBytes
-            textFormat: Text.PlainText
-            font.family: Theme.typography.mono
-            font.pixelSize: Theme.typography.secondaryText
-            color: Theme.palette.textTertiary
-        }
     }
 
     Repeater {
