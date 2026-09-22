@@ -382,7 +382,7 @@ impl AccountCore {
         self.require_managed(addr)?;
         let key = self.vault.open(addr, password)?;
         Ok(Zeroizing::new(hex::encode(
-            Zeroizing::new(key.DANGER_to_bytes()).as_slice(),
+            Zeroizing::new(*key.as_bytes()).as_slice(),
         )))
     }
 
@@ -1258,10 +1258,8 @@ mod tests {
             AccountEntry::add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text(value.into()))
         };
 
-        let mut phone = Account::from_signing_key(
-            Ed25519SigningKey::from_bytes(&key.DANGER_to_bytes()),
-            store.clone(),
-        );
+        let mut phone =
+            Account::from_signing_key(Ed25519SigningKey::from_bytes(key.as_bytes()), store.clone());
         let held = phone.update().push(name("Saro R")).publish().unwrap();
 
         let planned_on_nothing = Extending {
@@ -1437,7 +1435,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         let device = installation_key();
@@ -1467,7 +1465,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
         let device = installation_key();
         core.stage_add_installation(&addr, &hex::encode(device))
@@ -1501,7 +1499,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         publish_elsewhere(key, store, padded_to(Vec::new(), MAX_PAYLOAD_BYTES - 20));
@@ -1525,7 +1523,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
         let (first, second) = (installation_key(), installation_key());
         for device in [first, second] {
@@ -1583,7 +1581,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         let mut draft = AccountLogDraft::new();
@@ -1748,7 +1746,7 @@ mod tests {
         let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
         core.observe(&addr).unwrap();
 
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         let accounts = core.accounts().unwrap();
