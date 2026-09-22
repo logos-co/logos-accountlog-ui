@@ -35,6 +35,7 @@ PendingBar 1.0 PendingBar.qml
 AddInstallationSheet 1.0 AddInstallationSheet.qml
 DisplayNameSheet 1.0 DisplayNameSheet.qml
 PublishSheet 1.0 PublishSheet.qml
+UnlockSheet 1.0 UnlockSheet.qml
 ExportKeySheet 1.0 ExportKeySheet.qml
 ExportedKeySheet 1.0 ExportedKeySheet.qml
 ForgetAccountSheet 1.0 ForgetAccountSheet.qml

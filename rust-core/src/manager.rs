@@ -52,6 +52,8 @@ pub enum CoreError {
     Unknown,
     #[error("this app holds no key for that account, so it cannot write its log")]
     NotManaged,
+    #[error("this account is locked: unlock it with its password to sign")]
+    Locked,
     #[error("this app holds that account's key, so it is managed rather than observed")]
     AlreadyManaged,
     /// A caller reached the C ABI without one of the strings it names.
@@ -143,6 +145,8 @@ pub struct AccountSummary {
     /// Whether opening the key takes a password. False for an observed
     /// account, which has no key here to open.
     pub protected: bool,
+    /// Whether the key is sealed and not unlocked this session.
+    pub locked: bool,
     /// Whether the store has answered for this account since the app started,
     /// so a missing name is known to be missing.
     pub resolved: bool,
@@ -163,6 +167,9 @@ pub struct AccountState {
     /// this draws can write.
     pub managed: bool,
     pub protected: bool,
+    /// Whether the key is sealed and not unlocked this session, so nothing can
+    /// be signed until it is.
+    pub locked: bool,
     /// Whether the store has answered for this account since the app started.
     /// Distinguishes "nothing published" from "could not ask".
     pub resolved: bool,
@@ -274,6 +281,10 @@ pub struct AccountCore {
     /// Staged edits a read dropped that no answer has counted yet: a publish
     /// that fails after its read leaves them to the next refresh.
     dropped: HashMap<AccountAddr, usize>,
+    /// The sealed keys opened this session. Boxed so the map moves only the
+    /// pointer: a key moved by a resize or a removal would leave its bytes in
+    /// memory freed without being cleared.
+    unlocked: HashMap<AccountAddr, Box<Ed25519SigningKey>>,
 }
 
 impl AccountCore {
@@ -292,6 +303,7 @@ impl AccountCore {
             read: HashMap::new(),
             staged: HashMap::new(),
             dropped: HashMap::new(),
+            unlocked: HashMap::new(),
         }
     }
 
@@ -313,6 +325,7 @@ impl AccountCore {
                 pending: self.planned_entries(&held.addr).len(),
                 address: held.addr.to_string(),
                 protected: held.protected,
+                locked: held.protected && !self.unlocked.contains_key(&held.addr),
                 problem: self.problem(&held.addr),
             })
             // An address whose key arrived while it was observed is managed
@@ -324,6 +337,7 @@ impl AccountCore {
                     .map(|addr| AccountSummary {
                         managed: false,
                         protected: false,
+                        locked: false,
                         resolved: self.answered(addr),
                         display_name: self.live_name(addr),
                         pending: 0,
@@ -354,17 +368,22 @@ impl AccountCore {
         Ok(())
     }
 
-    /// Generate an account and take it into the vault.
-    pub fn create_account(&self, password: Option<&str>) -> Result<AccountAddr, CoreError> {
-        Ok(self
-            .vault
-            .create(&Ed25519SigningKey::generate(), password)?)
+    /// Generate an account and take it into the vault. A sealed one is
+    /// unlocked for the session, since its password was just given.
+    pub fn create_account(&mut self, password: Option<&str>) -> Result<AccountAddr, CoreError> {
+        let key = Box::new(Ed25519SigningKey::generate());
+        let addr = self.vault.create(&key, password)?;
+        if password.is_some() {
+            self.unlocked.insert(addr.clone(), key);
+        }
+        Ok(addr)
     }
 
     /// Take an account this app did not generate, from the 32-byte secret its
-    /// holder exported.
+    /// holder exported. A sealed one is unlocked for the session, as a created
+    /// one is.
     pub fn import_account(
-        &self,
+        &mut self,
         secret_hex: &str,
         password: Option<&str>,
     ) -> Result<AccountAddr, CoreError> {
@@ -379,9 +398,11 @@ impl AccountCore {
                 secret_hex.len()
             )),
         })?;
-        let addr = self
-            .vault
-            .create(&Ed25519SigningKey::from_bytes(&secret), password)?;
+        let key = Box::new(Ed25519SigningKey::from_bytes(&secret));
+        let addr = self.vault.create(&key, password)?;
+        if password.is_some() {
+            self.unlocked.insert(addr.clone(), key);
+        }
         // Its key is here now, so it is managed rather than observed: the same
         // account, the same log, the other group.
         self.observed.remove(&addr)?;
@@ -402,10 +423,20 @@ impl AccountCore {
         )))
     }
 
+    /// Open the sealed key of `addr` and hold it until the core is dropped, so
+    /// a publish asks for no password. An export still does.
+    pub fn unlock(&mut self, addr: &AccountAddr, password: &str) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
+        let key = Box::new(self.vault.open(addr, Some(password))?);
+        self.unlocked.insert(addr.clone(), key);
+        Ok(())
+    }
+
     /// Drop the account from the vault, with everything staged for it.
     pub fn forget_account(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
         self.require_managed(addr)?;
         self.vault.forget(addr)?;
+        self.unlocked.remove(addr);
         self.staged.remove(addr);
         self.read.remove(addr);
         self.dropped.remove(addr);
@@ -482,10 +513,12 @@ impl AccountCore {
             .cloned()
             .collect();
 
+        let protected = held.as_ref().is_some_and(|held| held.protected);
         Ok(AccountState {
             address: addr.to_string(),
             managed: held.is_some(),
-            protected: held.is_some_and(|held| held.protected),
+            protected,
+            locked: protected && !self.unlocked.contains_key(addr),
             resolved: self.answered(addr),
             read_at_ms: self.read_at(addr).map(since_epoch_ms),
             problem: self.problem(addr),
@@ -601,17 +634,13 @@ impl AccountCore {
     ///
     /// A store that already holds every staged edit is not a failure: the
     /// update is simply not needed.
-    pub fn publish(
-        &mut self,
-        addr: &AccountAddr,
-        password: Option<&str>,
-    ) -> Result<Published, CoreError> {
+    pub fn publish(&mut self, addr: &AccountAddr) -> Result<Published, CoreError> {
         self.require_managed(addr)?;
         if self.staged.get(addr).is_none_or(Vec::is_empty) {
             return Err(CoreError::NothingStaged);
         }
-        // Before the store is read, so a wrong password costs no request.
-        let key = self.vault.open(addr, password)?;
+        // Before the store is read, so a locked account costs no request.
+        let key = self.signing_key(addr)?;
         // Planned against what the store holds now rather than what this
         // instance last read, so the update extends the log the store holds.
         self.read_store(addr)?;
@@ -704,6 +733,18 @@ impl AccountCore {
 
     fn observes(&self, addr: &AccountAddr) -> Result<bool, CoreError> {
         Ok(self.observed.list()?.iter().any(|held| held == addr))
+    }
+
+    /// A copy of the key unlocked for `addr`, or its unsealed key from the
+    /// vault. A sealed key not unlocked is refused rather than asked for.
+    fn signing_key(&self, addr: &AccountAddr) -> Result<Ed25519SigningKey, CoreError> {
+        if let Some(key) = self.unlocked.get(addr) {
+            return Ok(Ed25519SigningKey::clone(key));
+        }
+        self.vault.open(addr, None).map_err(|e| match e {
+            VaultError::PasswordRequired => CoreError::Locked,
+            e => e.into(),
+        })
     }
 
     /// Refuse a write to an account whose key is elsewhere. Checked at the
@@ -1252,11 +1293,11 @@ mod tests {
         laptop.import_account(&secret, None).unwrap();
 
         phone.stage_set_display_name(&addr, "Saro").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         laptop.refresh(&addr).unwrap();
 
         phone.stage_set_display_name(&addr, "Saro R").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
 
         laptop.stage_set_display_name(&addr, "Saro P").unwrap();
         let pending = laptop.state(&addr).unwrap().pending;
@@ -1264,7 +1305,7 @@ mod tests {
             pending.iter().map(|row| row.kind).collect::<Vec<_>>(),
             ["displayName"]
         );
-        laptop.publish(&addr, None).unwrap();
+        laptop.publish(&addr).unwrap();
 
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Saro P"));
@@ -1300,7 +1341,7 @@ mod tests {
         let addr = core.create_account(None).unwrap();
         for name in ["Saro", "Raya", "Saro"] {
             core.stage_set_display_name(&addr, name).unwrap();
-            core.publish(&addr, None).unwrap();
+            core.publish(&addr).unwrap();
         }
 
         let state = core.state(&addr).unwrap();
@@ -1351,8 +1392,8 @@ mod tests {
         [tempfile::TempDir; 2],
     ) {
         let vaults = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
-        let phone = AccountCore::new(vaults[0].path(), store.clone());
-        let laptop = AccountCore::new(vaults[1].path(), store.clone());
+        let mut phone = AccountCore::new(vaults[0].path(), store.clone());
+        let mut laptop = AccountCore::new(vaults[1].path(), store.clone());
         let addr = phone.create_account(None).unwrap();
         let secret = phone.export_account(&addr, None).unwrap();
         laptop.import_account(&secret, None).unwrap();
@@ -1369,7 +1410,7 @@ mod tests {
         let key = hex::encode(installation_key());
 
         phone.stage_set_display_name(&addr, "Saro").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         laptop.refresh(&addr).unwrap();
 
         for device in [&mut laptop, &mut phone] {
@@ -1377,13 +1418,10 @@ mod tests {
             device.stage_add_installation(&addr, &key).unwrap();
         }
         laptop.stage_set_display_name(&addr, "Raya").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
 
         assert_eq!(laptop.refresh(&addr).unwrap(), 2);
-        assert_eq!(
-            laptop.publish(&addr, None).unwrap().first_new_index,
-            Some(3)
-        );
+        assert_eq!(laptop.publish(&addr).unwrap().first_new_index, Some(3));
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Raya"));
         assert_eq!(state.installations.len(), 1);
@@ -1391,9 +1429,9 @@ mod tests {
 
         phone.stage_set_display_name(&addr, "Pax").unwrap();
         laptop.stage_set_display_name(&addr, "Pax").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         assert_eq!(
-            laptop.publish(&addr, None).unwrap(),
+            laptop.publish(&addr).unwrap(),
             Published {
                 first_new_index: None,
                 dropped: 1
@@ -1416,7 +1454,7 @@ mod tests {
         let addr = core.create_account(None).unwrap();
 
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        assert_eq!(core.publish(&addr, None).unwrap().first_new_index, Some(0));
+        assert_eq!(core.publish(&addr).unwrap().first_new_index, Some(0));
         let state = core.state(&addr).unwrap();
         assert!(state.published);
         assert_eq!(state.display_name.as_deref(), Some("Saro"));
@@ -1485,7 +1523,7 @@ mod tests {
         let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
         let addr = core.create_account(None).unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        core.publish(&addr, None).unwrap();
+        core.publish(&addr).unwrap();
 
         assert!(matches!(
             core.stage_set_display_name(&addr, "  Saro "),
@@ -1507,7 +1545,7 @@ mod tests {
             core.stage_add_installation(&addr, &hex::encode(installation_key()))
                 .unwrap();
         }
-        core.publish(&addr, None).unwrap();
+        core.publish(&addr).unwrap();
 
         let state = core.state(&addr).unwrap();
         assert_eq!(
@@ -1618,7 +1656,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            core.publish(&addr, None).unwrap(),
+            core.publish(&addr).unwrap(),
             Published {
                 first_new_index: None,
                 dropped: 1
@@ -1675,10 +1713,7 @@ mod tests {
             padded_to(vec![endorsed], MAX_PAYLOAD_BYTES - 20),
         );
 
-        assert!(matches!(
-            core.publish(&addr, None),
-            Err(CoreError::OverBudget)
-        ));
+        assert!(matches!(core.publish(&addr), Err(CoreError::OverBudget)));
         assert_eq!(core.state(&addr).unwrap().pending.len(), 1);
         assert_eq!(core.refresh(&addr).unwrap(), 1);
     }
@@ -1691,7 +1726,7 @@ mod tests {
         let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
         let addr = core.create_account(None).unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        core.publish(&addr, None).unwrap();
+        core.publish(&addr).unwrap();
         let secret = core.export_account(&addr, None).unwrap();
         core.forget_account(&addr).unwrap();
         core.import_account(&secret, None).unwrap();
@@ -1839,10 +1874,7 @@ mod tests {
             core.discard_pending(&addr),
             Err(CoreError::NotManaged)
         ));
-        assert!(matches!(
-            core.publish(&addr, None),
-            Err(CoreError::NotManaged)
-        ));
+        assert!(matches!(core.publish(&addr), Err(CoreError::NotManaged)));
         assert!(matches!(
             core.export_account(&addr, None),
             Err(CoreError::NotManaged)

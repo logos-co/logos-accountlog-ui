@@ -15,6 +15,7 @@ ColumnLayout {
 
     signal addAccountRequested()
     signal observeAccountRequested()
+    signal unlockRequested()
     signal exportRequested()
     signal forgetRequested()
 
@@ -75,8 +76,21 @@ ColumnLayout {
                                                       : qsTr("Name pending")
             }
             Badge {
-                visible: root.store.observing || !root.store.isProtected
-                text: root.store.observing ? qsTr("Read only") : qsTr("No password")
+                tone: root.store.managed && root.store.isProtected && !root.store.locked
+                      ? "success" : "neutral"
+                text: root.store.observing ? qsTr("Read only")
+                    : !root.store.isProtected ? qsTr("No password")
+                    : root.store.locked ? qsTr("Locked")
+                    : qsTr("Unlocked")
+            }
+            LogosButton {
+                objectName: "unlockButton"
+                visible: root.store.managed && root.store.locked
+                text: qsTr("Unlock")
+                variant: LogosButton.Variant.Primary
+                compact: true
+                enabled: !root.store.busy
+                onClicked: root.unlockRequested()
             }
             LogosButton {
                 objectName: "exportKeyButton"
@@ -110,8 +124,10 @@ ColumnLayout {
         Layout.leftMargin: Theme.spacing.tiny
         body: root.store.observing
               ? qsTr("This module holds no key for this address, so it can read this log and never write it. Its entries are signed by whoever does.")
+              : root.store.locked
+              ? qsTr("This module holds this account's key, sealed with a password. Unlocking opens it for this session; nothing can be signed until it is.")
               : root.store.isProtected
-              ? qsTr("This module holds this account's key, sealed with a password. The address is that key's public half. Handing the account over is an export here and an import there, then forgetting it here.")
+              ? qsTr("This module holds this account's key, and it is open until the app closes. The address is that key's public half. Handing the account over is an export here and an import there, then forgetting it here.")
               : qsTr("This module holds this account's key, unsealed on this computer. The address is that key's public half. Handing the account over is an export here and an import there, then forgetting it here.")
     }
 }

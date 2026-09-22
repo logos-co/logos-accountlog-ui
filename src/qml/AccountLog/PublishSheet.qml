@@ -4,9 +4,9 @@ import QtQuick.Layouts
 import Logos.Theme
 import Logos.Controls
 
-// Send the staged entries as one update. Two shapes: a protected account is
-// asked for the password that opens its key, and an unprotected one is told
-// why it is not being asked.
+// Send the staged entries as one update. Nothing is asked for: a sealed key
+// was opened when the account was unlocked, and an unsealed one needs no
+// opening. The sheet says which.
 Sheet {
     property var store: null
 
@@ -19,8 +19,7 @@ Sheet {
     // the store holds only once it has.
     confirmEnabled: root.nothingLeft
                     || (root.store.pending.length > 0 && !root.store.busy
-                        && root.store.storeProblem === ""
-                        && (!root.store.isProtected || password.text.length > 0))
+                        && root.store.storeProblem === "")
     cancellable: !root.nothingLeft
     awaitingText: qsTr("Publishing. A publish cannot be stopped once sent, and the store has up to 15 seconds to answer.")
     backend: root.store.backend
@@ -35,27 +34,19 @@ Sheet {
                                    ? 0 : root.store.entries.length - root.entriesBefore
 
     function reset() {
-        password.text = ""
         root.entriesBefore = root.store.resolved ? root.store.entries.length : -1
-        if (root.store.isProtected)
-            password.field.forceActiveFocus()
     }
 
-    // The password is cleared once it is sent: a refusal asks for it again.
     onConfirmed: {
         if (root.nothingLeft) {
             root.close()
             return
         }
         root.send("publish")
-        store.backend.publish(root.store.isProtected ? password.text : "")
-        password.text = ""
+        store.backend.publish()
     }
     onLanded: root.close()
-    onCancelled: {
-        password.text = ""
-        root.close()
-    }
+    onCancelled: root.close()
 
     LogosText {
         Layout.fillWidth: true
@@ -132,17 +123,13 @@ Sheet {
         color: Theme.palette.textSecondary
     }
 
-    Field {
-        id: password
-        objectName: "publishPasswordField"
+    NoticeBar {
         Layout.fillWidth: true
         visible: root.store.isProtected && !root.nothingLeft
-        enabled: root.awaiting === ""
-        label: qsTr("Account password")
-        echoMode: TextInput.Password
-        help: qsTr("This account's key is sealed with this password. It opens the key for this publish only.")
-        onAccepted: root.submit()
-        onTextChanged: root.problem = ""
+        dismissable: false
+        tone: "info"
+        title: qsTr("This account is unlocked")
+        body: qsTr("Its key was opened with its password this session and stays open until the app closes, so publishing asks for nothing.")
     }
 
     NoticeBar {

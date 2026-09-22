@@ -317,12 +317,11 @@ async function main() {
   app.disconnect();
 }
 
-// Sign and send the staged entries as one update. The key is sealed, so the
-// sheet asks for the password that opens it.
+// Sign and send the staged entries as one update. The key is sealed, and was
+// unlocked by making the account, so the sheet asks for nothing.
 async function publish(insp) {
   await click(insp, "publishButton");
   await waitUntil(insp, "publishSheet.visible", true);
-  await type(insp, "publishPasswordField", PASSWORD);
   await confirm(insp, "publishSheet");
   await waitUntil(insp, "store.pending.length", 0);
 }

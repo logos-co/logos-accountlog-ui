@@ -67,7 +67,9 @@ fn importing_and_exporting_a_key_leaves_no_copy_behind() {
         HEX[i].store(*byte, Ordering::Relaxed);
     }
 
-    for password in [None, Some(c"a long quiet sentence")] {
+    // A sealed import is held unlocked until the forget, and both publishes
+    // sign.
+    for (password, name) in [(None, c"Saro"), (Some(c"a long quiet sentence"), c"Raya")] {
         let password = password.map_or(std::ptr::null(), CStr::as_ptr);
         ARMED.store(true, Ordering::Relaxed);
         let imported = call(logos_account_core_import_account(
@@ -78,9 +80,39 @@ fn importing_and_exporting_a_key_leaves_no_copy_behind() {
         let address = CString::new(imported["address"].as_str().unwrap()).unwrap();
         let exported = logos_account_core_export_account(core, address.as_ptr(), password);
         logos_account_core_string_free(exported);
-        ARMED.store(false, Ordering::Relaxed);
+        call(logos_account_core_stage_set_display_name(
+            core,
+            address.as_ptr(),
+            name.as_ptr(),
+        ));
+        assert_eq!(
+            call(logos_account_core_publish(core, address.as_ptr()))["ok"],
+            true
+        );
         call(logos_account_core_forget_account(core, address.as_ptr()));
+        ARMED.store(false, Ordering::Relaxed);
     }
+
+    // The table of unlocked keys is replaced as it grows, and keeps the slot a
+    // forget emptied until the handle goes: a key held in it rather than boxed
+    // would be left in both.
+    ARMED.store(true, Ordering::Relaxed);
+    let imported = call(logos_account_core_import_account(
+        core,
+        secret_hex.as_ptr(),
+        c"a long quiet sentence".as_ptr(),
+    ));
+    for _ in 0..4 {
+        call(logos_account_core_create_account(
+            core,
+            c"another quiet sentence".as_ptr(),
+        ));
+    }
+    let address = CString::new(imported["address"].as_str().unwrap()).unwrap();
+    call(logos_account_core_forget_account(core, address.as_ptr()));
+    logos_account_core_free(core);
+    ARMED.store(false, Ordering::Relaxed);
+    let core = logos_account_core_new(dir.as_ptr(), c"memory".as_ptr());
 
     // A key file that fails to parse after its key.
     let imported = call(logos_account_core_import_account(
@@ -104,7 +136,20 @@ fn importing_and_exporting_a_key_leaves_no_copy_behind() {
     ));
     ARMED.store(false, Ordering::Relaxed);
     assert_eq!(refused["ok"], false);
-
     logos_account_core_free(core);
+
+    // A key still unlocked when the handle goes.
+    let vault = tempfile::tempdir().unwrap();
+    let dir = CString::new(vault.path().to_str().unwrap()).unwrap();
+    let core = logos_account_core_new(dir.as_ptr(), c"memory".as_ptr());
+    ARMED.store(true, Ordering::Relaxed);
+    call(logos_account_core_import_account(
+        core,
+        secret_hex.as_ptr(),
+        c"a long quiet sentence".as_ptr(),
+    ));
+    logos_account_core_free(core);
+    ARMED.store(false, Ordering::Relaxed);
+
     assert_eq!(FOUND.load(Ordering::Relaxed), 0);
 }

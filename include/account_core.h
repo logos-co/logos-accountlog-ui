@@ -49,27 +49,29 @@ void logos_account_core_free(LogosAccountCore *core);
 // Clear and release any char * returned by this library. Safe on NULL.
 void logos_account_core_string_free(char *text);
 
-// {"ok":true,"store":"…","accounts":[{address,managed,protected,resolved,
-//                                     displayName,pending,problem}]}
+// {"ok":true,"store":"…","accounts":[{address,managed,protected,locked,
+//                                     resolved,displayName,pending,problem}]}
 //
 // Reads no store. Every account this app has, the ones it holds a key for
 // first and the ones it only observes after, which is the order a switcher
 // lists them in. `managed` is false for an observed account, which has no key
-// here, nothing to protect and nothing to publish. `resolved` says the store
+// here, nothing to protect and nothing to publish. `locked` is true for a
+// sealed account this handle has not unlocked. `resolved` says the store
 // has answered for the account this session; `displayName` is null until it
 // has, and when the log names none. `problem` is null unless the last read did
 // not land: one of "unverified", "forked", "unanswered".
 char *logos_account_core_accounts(LogosAccountCore *core);
 
 // Generate an account and take it into the vault. A NULL `password` means the
-// account chooses none, and its key is then stored in the clear.
+// account chooses none, and its key is then stored in the clear. A sealed one
+// starts unlocked, as logos_account_core_unlock leaves it.
 // {"ok":true,"address":"<64 hex>"}
 char *logos_account_core_create_account(LogosAccountCore *core, const char *password);
 
 // Take an account made elsewhere, from the 32-byte secret its holder exported
 // as 64 hex characters. {"ok":true,"address":"<64 hex>","alreadyHeld":b}: an
 // account the vault already holds is found rather than refused, and kept as it
-// is, password and all.
+// is, password and all. A sealed one taken in starts unlocked.
 char *logos_account_core_import_account(LogosAccountCore *core,
                                         const char *secret_hex,
                                         const char *password);
@@ -80,6 +82,13 @@ char *logos_account_core_import_account(LogosAccountCore *core,
 char *logos_account_core_export_account(LogosAccountCore *core,
                                         const char *address,
                                         const char *password);
+
+// Open a sealed account's key and hold it until the handle is freed, so a
+// publish asks for no password. An export still asks for it. Refused for a
+// wrong password, and for an account that has none.
+char *logos_account_core_unlock(LogosAccountCore *core,
+                                const char *address,
+                                const char *password);
 
 // Drop the account and its key from the vault. Nothing here can recover it,
 // and the log it signed can never be extended again.
@@ -108,7 +117,7 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 // {"ok":true,"state":{…}}: everything the Manage pane draws for one account,
 // from what is already held. Reads no store.
 //
-// state = { address, managed, protected, resolved, readAtMs, problem,
+// state = { address, managed, protected, locked, resolved, readAtMs, problem,
 //           published, logBytes, maxBytes,
 //           domainBytes, displayName, displayNameIndex,
 //           previousNames:[{index,value}], installations:[{index,key}],
@@ -143,6 +152,8 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 //
 // `managed` is false for an observed account: the whole of what this app can
 // do with it is on this reply, and every call below is refused for it.
+// `locked` is true for a sealed account this handle has not unlocked, which
+// can stage but not publish.
 //
 // Every stage call below is refused while `unreadable` is set, and for an edit
 // that would take the log last read past its budget. A publish measures again
@@ -176,10 +187,9 @@ char *logos_account_core_discard_pending(LogosAccountCore *core, const char *add
 // hold as one update. All or nothing: one rejected entry writes none of them.
 // {"ok":true,"firstNewIndex":n,"dropped":d}: the index of the first entry
 // written, null when the store already held every staged edit, and the staged
-// edits it held, counted as refresh counts them.
-char *logos_account_core_publish(LogosAccountCore *core,
-                                 const char *address,
-                                 const char *password);
+// edits it held, counted as refresh counts them. Refused while the account is
+// locked, before the store is read.
+char *logos_account_core_publish(LogosAccountCore *core, const char *address);
 
 #ifdef __cplusplus
 }

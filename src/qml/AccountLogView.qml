@@ -101,7 +101,8 @@ Item {
             if (store.ready)
                 return
             for (const sheet of [addInstallationSheet, displayNameSheet, publishSheet,
-                                 exportKeySheet, forgetAccountSheet, observeAccountSheet])
+                                 unlockSheet, exportKeySheet, forgetAccountSheet,
+                                 observeAccountSheet])
                 sheet.close()
         }
     }
@@ -202,6 +203,10 @@ Item {
                 observeAccountSheet.open()
                 observeAccountSheet.reset()
             }
+            onUnlockRequested: {
+                unlockSheet.open()
+                unlockSheet.reset()
+            }
             onExportRequested: {
                 exportKeySheet.open()
                 exportKeySheet.reset()
@@ -282,6 +287,13 @@ Item {
                 // Read first, so the preview is of what the store holds now: an
                 // edit another device already wrote drops out of it.
                 onPublishRequested: {
+                    // Nothing can be signed until the key is open, so that
+                    // is asked for first and Publish pressed again after.
+                    if (store.locked) {
+                        unlockSheet.open()
+                        unlockSheet.reset()
+                        return
+                    }
                     // What the sheet's read finds is said again inside the
                     // sheet, so a notice from before it must not be.
                     store.backend.dismissNotice()
@@ -305,6 +317,11 @@ Item {
 
     PublishSheet {
         id: publishSheet
+        store: store
+    }
+
+    UnlockSheet {
+        id: unlockSheet
         store: store
     }
 

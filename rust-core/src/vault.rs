@@ -8,7 +8,8 @@
 //! the two spellings exist so that an unprotected key cannot be mistaken on
 //! sight for a sealed one.
 //!
-//! A key is decrypted for one call and dropped.
+//! A key is decrypted per call and handed over: how long it lives is the
+//! caller's to decide.
 
 use std::fs::{self, File};
 use std::io;

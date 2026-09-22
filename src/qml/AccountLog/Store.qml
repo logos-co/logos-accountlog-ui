@@ -80,6 +80,10 @@ QtObject {
         return null
     }
     readonly property bool isProtected: held !== null && held.protected === true
+    // Sealed, and not unlocked this session: it can stage and cannot publish.
+    // Read from the listing, like the protection, so it is right while the
+    // state is still on its way.
+    readonly property bool locked: held !== null && held.locked === true
     // Whether this module holds the key, and so whether anything on screen can
     // write. An account whose state has not landed counts as managed: every
     // control is disabled while `loading`, and the read-only screen must not
