@@ -13,14 +13,16 @@ intro: |
   launches it headless through
   [`logos-qt-mcp`](https://github.com/logos-co/logos-qt-mcp), and drives it the
   way a person would: make a key, give the account a name, endorse an
-  installation, publish. The screenshot below is the real app at the end of that
-  run, and every number in it was measured by the app's own library rather than
-  written into this page.
+  installation, publish, and then read an account whose key it does not hold.
+  The screenshot below is the real app at the end of that run, and every number
+  in it was measured by the app's own library rather than written into this
+  page.
 
 what_you_build: "A published account log with two entries, written by driving the real UI: an account key sealed with a password, a display name, and an endorsed installation key."
 
 what_you_learn:
   - "Why an account is a log, and why nothing in it is ever removed"
+  - "What an account without its key is, and what a module can do with one"
   - "What a staged edit is, and why a publish is all of them or none"
   - "What each kind of entry costs the log's 128 KiB lifetime budget, and where that number comes from"
   - "How a `ui_qml` Logos plugin is launched standalone and driven headless"
@@ -79,9 +81,11 @@ sections:
 
       The `walkthrough` app is what drives it. It launches the plugin headless
       on an empty vault, makes a key sealed with a password, names the account,
-      publishes, endorses an installation key and publishes again. Every step is
-      finished when the app itself says so, and the picture is taken then, so
-      each one below is a state the app really reached.
+      publishes, endorses an installation key and publishes again. Then it
+      makes a second account, publishes a name from it, gives its key up, and
+      takes the address back on as one it only reads. Every step is finished
+      when the app itself says so, and the picture is taken then, so each one
+      below is a state the app really reached.
 
       Two things make that run hermetic. `LOGOS_ACCOUNTLOG_VAULT_DIR` puts the
       key files in the run's own directory, so the walkthrough always starts
@@ -130,6 +134,21 @@ sections:
       grew, nothing in it moved.
 
       ![The account endorses an installation](images/06-installation-endorsed.png)
+
+      An account is a log in a store, and a key is what writes it. Take the key
+      away and the log is still there, still verifiable against the address
+      that names it, and still readable by anyone who asks the store for it. So
+      the walkthrough makes a second account, publishes a name from it, gives
+      its key up, and then takes the address back on as one it only **observes**
+      -- the one way a run with no second computer can show what every other
+      account in the world looks like from here.
+
+      What comes back is the same screen with everything that needs a key taken
+      out of it: the log as the store serves it, verified under that address,
+      and nothing to publish. Reading an account takes no key and sends none,
+      and the account never learns that anyone is reading.
+
+      ![An account this module reads and cannot write](images/07-an-observed-account.png)
     steps:
       - title: "Write the log and show it"
         ui_test:

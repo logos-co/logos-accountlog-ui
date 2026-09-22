@@ -2,8 +2,9 @@
 //
 // Link against liblogos_account_core.a. The library is the whole of what this
 // app decides about an account: it holds the keys, stages edits to a log, signs
-// them and publishes them. Nothing below is a Logos module call, so no key and
-// no password crosses a process boundary.
+// them and publishes them, and reads the logs of accounts whose key is
+// elsewhere. Nothing below is a Logos module call, so no key and no password
+// crosses a process boundary.
 //
 // Ownership: every char * returned here belongs to the caller and must be
 // released with logos_account_core_string_free, which clears it first. The
@@ -48,11 +49,16 @@ void logos_account_core_free(LogosAccountCore *core);
 // Clear and release any char * returned by this library. Safe on NULL.
 void logos_account_core_string_free(char *text);
 
-// {"ok":true,"store":"…","accounts":[{address,protected,resolved,displayName,pending}]}
+// {"ok":true,"store":"…","accounts":[{address,managed,protected,resolved,
+//                                     displayName,pending,problem}]}
 //
-// Reads the vault only. `resolved` says the store has answered for the account
-// this session; `displayName` is null until it has, and when the log names
-// none.
+// Reads no store. Every account this app has, the ones it holds a key for
+// first and the ones it only observes after, which is the order a switcher
+// lists them in. `managed` is false for an observed account, which has no key
+// here, nothing to protect and nothing to publish. `resolved` says the store
+// has answered for the account this session; `displayName` is null until it
+// has, and when the log names none. `problem` is null unless the last read did
+// not land: one of "unverified", "forked", "unanswered".
 char *logos_account_core_accounts(LogosAccountCore *core);
 
 // Generate an account and take it into the vault. A NULL `password` means the
@@ -79,6 +85,20 @@ char *logos_account_core_export_account(LogosAccountCore *core,
 // and the log it signed can never be extended again.
 char *logos_account_core_forget_account(LogosAccountCore *core, const char *address);
 
+// Start reading the log published under this address, whose key is somewhere
+// else. {"ok":true,"alreadyObserved":b}: an address already observed is found
+// rather than refused. An address the vault holds is refused, since this app
+// manages that account rather than observing it.
+//
+// Nothing is read here: the address is taken on, and
+// logos_account_core_refresh fetches it.
+char *logos_account_core_observe_account(LogosAccountCore *core, const char *address);
+
+// Stop reading the log under this address, dropping what was read with it.
+// Refused for an address this app does not observe. Nothing is lost that the
+// store does not still hold.
+char *logos_account_core_stop_observing(LogosAccountCore *core, const char *address);
+
 // {"ok":true,"dropped":n}: read the store for this account, adopting the log
 // only where it extends what is already held, and drop the staged edits that
 // log already holds. n counts them since the last answer, so a publish that
@@ -88,7 +108,8 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 // {"ok":true,"state":{…}}: everything the Manage pane draws for one account,
 // from what is already held. Reads no store.
 //
-// state = { address, protected, resolved, published, logBytes, maxBytes,
+// state = { address, managed, protected, resolved, readAtMs, problem,
+//           published, logBytes, maxBytes,
 //           domainBytes, displayName, installations:[{index,key}],
 //           entries:[{index,kind,context,value,live,target,bytes}],
 //           unreadable, pending:[…],
@@ -103,7 +124,16 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 // edit exists; a display name costs `displayName` plus its own UTF-8 bytes.
 // `resolved` says the store has answered for this account since the handle
 // was opened, so a false `published` beside it means nothing was published
-// rather than that the store could not be asked.
+// rather than that the store could not be asked. `readAtMs` is when it
+// answered, in milliseconds since the epoch, and null until it has. `problem`
+// is why the last read did not land, null where it did: "unverified" for a log
+// whose signature does not check against the address, "forked" for one that
+// does not extend the log already read, "unanswered" for a store that did not
+// answer with a log at all. Set beside a resolved account, it says the copy on
+// screen is not the store's last word.
+//
+// `managed` is false for an observed account: the whole of what this app can
+// do with it is on this reply, and every call below is refused for it.
 //
 // Every stage call below is refused while `unreadable` is set, and for an edit
 // that would take the log last read past its budget. A publish measures again

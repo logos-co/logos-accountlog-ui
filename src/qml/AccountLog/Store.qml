@@ -49,6 +49,23 @@ QtObject {
         }
     }
 
+    // The two groups the switcher lists, in the order the core answers them:
+    // the accounts this module can write, then the ones it can only read.
+    readonly property var managedAccounts: {
+        var out = []
+        for (var i = 0; i < accounts.length; ++i)
+            if (accounts[i].managed !== false)
+                out.push(accounts[i])
+        return out
+    }
+    readonly property var observedAccounts: {
+        var out = []
+        for (var i = 0; i < accounts.length; ++i)
+            if (accounts[i].managed === false)
+                out.push(accounts[i])
+        return out
+    }
+
     readonly property string address: ready && backend ? backend.selectedAddress : ""
     // The selected account's state has landed.
     readonly property bool hasAccount: (state.address || "") !== ""
@@ -63,6 +80,12 @@ QtObject {
         return null
     }
     readonly property bool isProtected: held !== null && held.protected === true
+    // Whether this module holds the key, and so whether anything on screen can
+    // write. An account whose state has not landed counts as managed: every
+    // control is disabled while `loading`, and the read-only screen must not
+    // flash between two accounts.
+    readonly property bool managed: state.managed !== false
+    readonly property bool observing: !managed
     readonly property bool busy: (ready && backend ? backend.busy : false) || loading
     readonly property var entries: state.entries || []
     readonly property var installations: state.installations || []
@@ -74,6 +97,21 @@ QtObject {
     // The store has answered for this account, so `published` is its answer
     // rather than a default.
     readonly property bool resolved: state.resolved === true
+    // When the log on screen was read, in milliseconds since the epoch, and 0
+    // until one has been. A real, since the epoch in milliseconds outgrows an
+    // int well before this app is built.
+    readonly property real readAtMs: state.readAtMs || 0
+    // Why the last read did not land, in the core's words: "unverified",
+    // "forked", "unanswered", or empty where it did.
+    readonly property string problem: state.problem || ""
+    // How far the log on screen is from the store, as one word, so the panels
+    // do not each re-derive it: "" is the store's last word, "stale" is an
+    // earlier read that a later one could not replace, and the rest are the
+    // read that never landed. `resolved` is the pair of this: false means
+    // there is no log here to draw at all.
+    readonly property string reading: problem === "" ? (resolved ? "" : "unread")
+                                    : resolved ? "stale"
+                                    : problem
     readonly property string storeProblem: ready && backend ? backend.storeProblem : ""
     readonly property string vaultProblem: ready && backend ? backend.vaultProblem : ""
     readonly property string unreadable: state.unreadable || ""

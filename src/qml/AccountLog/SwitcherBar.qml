@@ -10,9 +10,17 @@ import Logos.Controls
 // Exactly one thing on this screen names the account, and it is this bar:
 // choosing an account changes the whole screen, not just the panel beneath it.
 // Nothing below repeats the name.
+//
+// Both kinds of account are in the one list, under a heading each that says
+// what the word means: two words picked out of a list cannot teach a reader
+// the difference between holding an account's key and not holding it, and this
+// is the one place every reader passes through.
 Item {
+    objectName: "switcherBar"
+
     property var store: null
     signal addAccountRequested()
+    signal observeAccountRequested()
 
     id: root
     implicitHeight: 56
@@ -46,26 +54,34 @@ Item {
             // since the layout rounds a width down and a name a fraction of a
             // pixel short of its own width elides.
             LogosText {
+                readonly property bool named: root.store.displayName !== ""
+
+                // An account with no name is its address: a bar saying
+                // "Unnamed account" names nothing at all, and the address is
+                // what the account actually is.
                 text: root.store.loading ? qsTr("Loading")
-                    : root.store.displayName !== "" ? root.store.displayName
-                    : root.store.resolved ? qsTr("Unnamed account")
-                    : qsTr("Not read yet")
+                    : named ? root.store.displayName
+                    : Fmt.mid(root.store.address, 10)
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 Layout.fillWidth: true
                 Layout.maximumWidth: Math.ceil(implicitWidth)
-                font.pixelSize: root.store.displayName !== ""
-                                ? Theme.typography.panelTitleText
-                                : Theme.typography.subtitleText
-                font.weight: root.store.displayName !== ""
-                             ? Theme.typography.weightBold
-                             : Theme.typography.weightRegular
-                color: root.store.displayName !== "" ? Theme.palette.text
-                                                     : Theme.palette.textTertiary
+                font.family: named ? Theme.typography.publicSans : Theme.typography.mono
+                font.pixelSize: named ? Theme.typography.panelTitleText
+                                      : Theme.typography.subtitleText
+                font.weight: named ? Theme.typography.weightBold
+                                   : Theme.typography.weightRegular
+                color: named ? Theme.palette.text : Theme.palette.textSecondary
             }
 
+            // The two can never appear together: an account with no key here
+            // can stage nothing, so Read only sits where Pending would.
             Badge {
-                visible: root.store.renaming
+                visible: root.store.observing
+                text: qsTr("Read only")
+            }
+            Badge {
+                visible: !root.store.observing && root.store.renaming
                 tone: "pending"
                 text: qsTr("Pending")
             }
@@ -119,77 +135,99 @@ Item {
             id: list
             spacing: 2
 
-            Eyebrow {
-                Layout.leftMargin: 10
-                Layout.topMargin: Theme.spacing.tiny
-                label: qsTr("Accounts on this module")
-            }
+            // A module with many accounts scrolls rather than growing a
+            // popover past the window it is drawn in.
+            LogosScrollView {
+                id: roster
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(rosterColumn.implicitHeight, 420)
 
-            Repeater {
-                model: root.store.accounts
+                ColumnLayout {
+                    id: rosterColumn
+                    width: roster.availableWidth
+                    spacing: 2
 
-                delegate: Rectangle {
-                    required property var modelData
+                    // An empty group draws nothing at all: a heading over no
+                    // rows teaches the word without showing the thing.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: root.store.managedAccounts.length > 0
+                        spacing: 2
 
-                    id: option
-
-                    Layout.fillWidth: true
-                    implicitHeight: 48
-                    radius: Theme.spacing.radiusMedium
-                    color: option.modelData.address === root.store.address
-                           ? Qt.rgba(Theme.palette.primary.r, Theme.palette.primary.g,
-                                     Theme.palette.primary.b, 0.18)
-                           : "transparent"
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            popover.close()
-                            root.store.backend.selectAccount(option.modelData.address)
-                        }
-                    }
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        spacing: Theme.spacing.medium
-
-                        ColumnLayout {
+                        RowLayout {
                             Layout.fillWidth: true
-                            spacing: 0
+                            Layout.leftMargin: 10
+                            Layout.topMargin: Theme.spacing.tiny
+                            spacing: Theme.spacing.small
 
-                            LogosText {
-                                // A name is only known to be missing once the
-                                // store has answered for the account.
-                                text: option.modelData.displayName ? option.modelData.displayName
-                                    : option.modelData.resolved ? qsTr("Unnamed account")
-                                    : qsTr("Not read yet")
-                                textFormat: Text.PlainText
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                                font.pixelSize: Theme.typography.primaryText
-                                color: option.modelData.displayName ? Theme.palette.text
-                                                             : Theme.palette.textTertiary
+                            Eyebrow {
+                                label: qsTr("Managed · %1").arg(root.store.managedAccounts.length)
                             }
                             LogosText {
-                                text: Fmt.mid(option.modelData.address, 10)
+                                Layout.fillWidth: true
+                                text: qsTr("this module holds the key")
                                 textFormat: Text.PlainText
-                                font.family: Theme.typography.mono
-                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                                font.pixelSize: Theme.typography.secondaryText
                                 color: Theme.palette.textTertiary
                             }
                         }
 
-                        Badge {
-                            visible: !option.modelData.protected
-                            text: qsTr("No password")
+                        Repeater {
+                            model: root.store.managedAccounts
+
+                            delegate: SwitcherRow {
+                                required property var modelData
+
+                                Layout.fillWidth: true
+                                account: modelData
+                                current: modelData.address === root.store.address
+                                onChosen: {
+                                    popover.close()
+                                    root.store.backend.selectAccount(modelData.address)
+                                }
+                            }
                         }
-                        Badge {
-                            visible: option.modelData.pending > 0
-                            tone: "pending"
-                            text: qsTr("%1 pending").arg(option.modelData.pending)
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: root.store.observedAccounts.length > 0
+                        spacing: 2
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 10
+                            Layout.topMargin: Theme.spacing.tiny
+                            spacing: Theme.spacing.small
+
+                            Eyebrow {
+                                label: qsTr("Observed · %1").arg(root.store.observedAccounts.length)
+                            }
+                            LogosText {
+                                Layout.fillWidth: true
+                                text: qsTr("read only, no key here")
+                                textFormat: Text.PlainText
+                                elide: Text.ElideRight
+                                font.pixelSize: Theme.typography.secondaryText
+                                color: Theme.palette.textTertiary
+                            }
+                        }
+
+                        Repeater {
+                            model: root.store.observedAccounts
+
+                            delegate: SwitcherRow {
+                                required property var modelData
+
+                                Layout.fillWidth: true
+                                account: modelData
+                                current: modelData.address === root.store.address
+                                onChosen: {
+                                    popover.close()
+                                    root.store.backend.selectAccount(modelData.address)
+                                }
+                            }
                         }
                     }
                 }
@@ -202,13 +240,27 @@ Item {
                 color: Theme.palette.borderSubtle
             }
 
-            LogosButton {
+            RowLayout {
                 Layout.margins: Theme.spacing.tiny
-                text: qsTr("Add an account")
-                onClicked: {
-                    popover.close()
-                    root.addAccountRequested()
+                spacing: Theme.spacing.small
+
+                LogosButton {
+                    objectName: "addAccountButton"
+                    text: qsTr("Add an account")
+                    onClicked: {
+                        popover.close()
+                        root.addAccountRequested()
+                    }
                 }
+                LogosButton {
+                    objectName: "observeAccountButton"
+                    text: qsTr("Observe an account")
+                    onClicked: {
+                        popover.close()
+                        root.observeAccountRequested()
+                    }
+                }
+                Item { Layout.fillWidth: true }
             }
         }
     }

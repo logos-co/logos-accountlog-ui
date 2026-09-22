@@ -252,7 +252,7 @@ struct OpenDocument<'a> {
 }
 
 fn write_open_document(addr: &AccountAddr, key: &Ed25519SigningKey) -> Zeroizing<Vec<u8>> {
-    let secret = Zeroizing::new(key.DANGER_to_bytes());
+    let secret = Zeroizing::new(*key.as_bytes());
     let mut hex_key = Zeroizing::new([0u8; 64]);
     hex::encode_to_slice(secret.as_slice(), hex_key.as_mut_slice())
         .expect("32 bytes are 64 hex characters");
@@ -316,7 +316,7 @@ impl Stage {
     }
 
     fn seal(&self, key: &Ed25519SigningKey, password: &str) -> Result<(), VaultError> {
-        let secret = Zeroizing::new(key.DANGER_to_bytes());
+        let secret = Zeroizing::new(*key.as_bytes());
         eth_keystore::encrypt_key(
             &self.0,
             &mut rand::thread_rng(),
@@ -398,13 +398,13 @@ fn check_params(json: &str) -> Result<(), VaultError> {
 }
 
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_: &Path, _: u32) -> io::Result<()> {
+pub(crate) fn set_mode(_: &Path, _: u32) -> io::Result<()> {
     Ok(())
 }
 
@@ -467,7 +467,7 @@ mod tests {
             }]
         );
         let opened = vault.open(&addr, Some("correct horse")).unwrap();
-        assert_eq!(opened.DANGER_to_bytes(), key.DANGER_to_bytes());
+        assert_eq!(opened.as_bytes(), key.as_bytes());
     }
 
     #[test]
@@ -508,10 +508,7 @@ mod tests {
                 protected: false
             }]
         );
-        assert_eq!(
-            vault.open(&addr, None).unwrap().DANGER_to_bytes(),
-            key.DANGER_to_bytes()
-        );
+        assert_eq!(vault.open(&addr, None).unwrap().as_bytes(), key.as_bytes());
     }
 
     /// The point of the second spelling: the file says what it is holding, so
@@ -524,7 +521,7 @@ mod tests {
 
         let text = fs::read_to_string(vault.path_of(&addr, false)).unwrap();
 
-        assert!(text.contains(&hex::encode(key.DANGER_to_bytes())));
+        assert!(text.contains(&hex::encode(key.as_bytes())));
         assert!(text.contains(OPEN_WARNING));
     }
 
@@ -561,18 +558,12 @@ mod tests {
         expected.sort_by_key(AccountAddr::to_string);
         assert_eq!(addresses(&vault), expected);
         assert_eq!(
-            vault
-                .open(&addr_of(&first), Some("pw"))
-                .unwrap()
-                .DANGER_to_bytes(),
-            first.DANGER_to_bytes()
+            vault.open(&addr_of(&first), Some("pw")).unwrap().as_bytes(),
+            first.as_bytes()
         );
         assert_eq!(
-            vault
-                .open(&addr_of(&second), None)
-                .unwrap()
-                .DANGER_to_bytes(),
-            second.DANGER_to_bytes()
+            vault.open(&addr_of(&second), None).unwrap().as_bytes(),
+            second.as_bytes()
         );
     }
 
@@ -586,8 +577,8 @@ mod tests {
 
         assert!(matches!(refused, Err(VaultError::AccountExists(_))));
         assert_eq!(
-            vault.open(&addr, Some("pw")).unwrap().DANGER_to_bytes(),
-            key.DANGER_to_bytes()
+            vault.open(&addr, Some("pw")).unwrap().as_bytes(),
+            key.as_bytes()
         );
     }
 

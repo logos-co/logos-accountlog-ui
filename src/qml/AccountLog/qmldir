@@ -18,6 +18,7 @@ Field 1.0 Field.qml
 Door 1.0 Door.qml
 
 SwitcherBar 1.0 SwitcherBar.qml
+SwitcherRow 1.0 SwitcherRow.qml
 AccountPanel 1.0 AccountPanel.qml
 InstallationList 1.0 InstallationList.qml
 InstallationRow 1.0 InstallationRow.qml
@@ -33,6 +34,7 @@ PublishSheet 1.0 PublishSheet.qml
 ExportKeySheet 1.0 ExportKeySheet.qml
 ExportedKeySheet 1.0 ExportedKeySheet.qml
 ForgetAccountSheet 1.0 ForgetAccountSheet.qml
+ObserveAccountSheet 1.0 ObserveAccountSheet.qml
 
 AddAccountScreen 1.0 AddAccountScreen.qml
 CreateAccountScreen 1.0 CreateAccountScreen.qml

@@ -2,7 +2,9 @@
 
 A standalone test that writes a whole account log by driving the real app:
 an empty vault, a key sealed with a password, a display name staged and
-published, an installation endorsed and published.
+published, an installation endorsed and published. Then the other half: a
+second account published and its key given up, so the same app reads a log it
+can no longer write.
 
 It exists because the doc-test harness drives one instance through a list of
 actions in YAML, and every one of those actions is printed into the published
@@ -31,7 +33,7 @@ doctests/walkthrough/run-walkthrough.sh
 ```
 
 Builds the app from this checkout, drives the walkthrough and writes
-`01-add-an-account.png` through `06-installation-endorsed.png` into
+`01-add-an-account.png` through `07-an-observed-account.png` into
 `doctests/images`. That directory is build output, not source: CI runs this on
 every push in the `walkthrough screenshots` job and lays what it captured beside
 the published report, which is where the tutorial's figures resolve.

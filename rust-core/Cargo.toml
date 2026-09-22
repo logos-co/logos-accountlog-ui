@@ -18,10 +18,10 @@ name = "logos_account_core"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# Not on logos-chat's main: the account crates live on PR #226, and #255 adds
-# the key import and export this vault is built around. Repinned when they land.
-account = { git = "https://github.com/logos-messaging/logos-chat.git", rev = "edf8ffd49d803a4432d331f57d18605940a30ae4" }
-account-log = { git = "https://github.com/logos-messaging/logos-chat.git", rev = "edf8ffd49d803a4432d331f57d18605940a30ae4" }
+# The key import and export this vault is built around is not on logos-chat's
+# main: it is PR #255. Repinned to main when that lands.
+account = { git = "https://github.com/logos-messaging/logos-chat.git", rev = "398cddbbc3795b13a52eb7f460f591597798e4b6" }
+account-log = { git = "https://github.com/logos-messaging/logos-chat.git", rev = "398cddbbc3795b13a52eb7f460f591597798e4b6" }
 eth-keystore = "0.5"
 hex = "0.4"
 rand = "0.8"

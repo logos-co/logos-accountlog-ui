@@ -6,9 +6,10 @@
 //! staged list is this app's, not the log's, and it survives only as long as
 //! the process does.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use account::{Account, AccountError, AccountProvider, AccountPublisher, AccountResolver};
 use account_log::{
@@ -20,6 +21,7 @@ use serde::Serialize;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
+use crate::observed::{ObservedAccounts, ObservedError};
 use crate::store::{Store, StoreError};
 use crate::vault::{Vault, VaultError};
 
@@ -42,8 +44,16 @@ pub enum CoreError {
     Log(#[from] AccountLogError),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Observed(#[from] ObservedError),
     #[error("not an account address: 64 lowercase hex characters, unprefixed")]
     Address,
+    #[error("this app neither holds nor observes that account")]
+    Unknown,
+    #[error("this app holds no key for that account, so it cannot write its log")]
+    NotManaged,
+    #[error("this app holds that account's key, so it is managed rather than observed")]
+    AlreadyManaged,
     /// A caller reached the C ABI without one of the strings it names.
     #[error("missing or malformed argument")]
     Argument,
@@ -87,11 +97,51 @@ enum StagedEdit {
 /// size of a log that has published nothing.
 pub const DOMAIN_BYTES: usize = ACCOUNT_LOG_DOMAIN.len();
 
+/// Why the last read of the store did not land. The view words each of these,
+/// so what crosses is the kind and not the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReadProblem {
+    /// The store served a log whose signature does not check against the
+    /// address it was asked about, or one this build cannot decode at all.
+    Unverified,
+    /// The store served a log that does not extend the one held: the account
+    /// has shown two histories, and the one already verified stands.
+    Forked,
+    /// The store did not answer, or answered something that is not a log.
+    Unanswered,
+}
+
+impl ReadProblem {
+    /// A read's failure as the screen has to tell them apart. The message
+    /// itself still reaches the view, and says which store and why.
+    fn of(error: &AccountError) -> Self {
+        match error {
+            AccountError::Log(_) => Self::Unverified,
+            AccountError::Forked => Self::Forked,
+            AccountError::Provider(_) => Self::Unanswered,
+        }
+    }
+}
+
+/// What the last read of the store left behind for one account: when it last
+/// answered with a log, and what went wrong since, if anything.
+#[derive(Debug, Clone, Copy, Default)]
+struct LastRead {
+    at: Option<SystemTime>,
+    problem: Option<ReadProblem>,
+}
+
 /// One account, as the vault and the store together know it.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {
     pub address: String,
+    /// Whether this app holds the key. False for an account it only observes,
+    /// whose log it reads and can never extend.
+    pub managed: bool,
+    /// Whether opening the key takes a password. False for an observed
+    /// account, which has no key here to open.
     pub protected: bool,
     /// Whether the store has answered for this account since the app started,
     /// so a missing name is known to be missing.
@@ -99,6 +149,9 @@ pub struct AccountSummary {
     /// The name live in the published log, if the store has been read.
     pub display_name: Option<String>,
     pub pending: usize,
+    /// Why the last read of this account did not land, for the one badge a
+    /// row carries when something is not as it should be.
+    pub problem: Option<ReadProblem>,
 }
 
 /// Everything the Manage pane draws for one account.
@@ -106,10 +159,21 @@ pub struct AccountSummary {
 #[serde(rename_all = "camelCase")]
 pub struct AccountState {
     pub address: String,
+    /// Whether this app holds the key, and so whether anything on the screen
+    /// this draws can write.
+    pub managed: bool,
     pub protected: bool,
     /// Whether the store has answered for this account since the app started.
     /// Distinguishes "nothing published" from "could not ask".
     pub resolved: bool,
+    /// When the log on screen was read, in milliseconds since the epoch, so
+    /// the view can say how old the copy it is drawing is. None until one has
+    /// been read.
+    pub read_at_ms: Option<u64>,
+    /// Why the last read did not land. Set beside a log where an earlier read
+    /// answered and a later one did not, which is how the screen knows the
+    /// copy it draws is not the store's last word.
+    pub problem: Option<ReadProblem>,
     pub published: bool,
     pub log_bytes: usize,
     pub max_bytes: usize,
@@ -182,11 +246,12 @@ pub struct Published {
 
 pub struct AccountCore {
     vault: Vault,
+    observed: ObservedAccounts,
     store: Store,
     resolver: AccountResolver<ReadBack>,
     written: Written,
-    /// The accounts the store has answered for.
-    read: HashSet<AccountAddr>,
+    /// What the store last said about each account it was asked about.
+    read: HashMap<AccountAddr, LastRead>,
     staged: HashMap<AccountAddr, Vec<StagedEdit>>,
     /// Staged edits a read dropped that no answer has counted yet: a publish
     /// that fails after its read leaves them to the next refresh.
@@ -196,15 +261,17 @@ pub struct AccountCore {
 impl AccountCore {
     pub fn new(vault_dir: impl Into<PathBuf>, store: Store) -> Self {
         let written = Written::default();
+        let vault_dir = vault_dir.into();
         Self {
-            vault: Vault::new(vault_dir),
+            vault: Vault::new(vault_dir.clone()),
+            observed: ObservedAccounts::new(vault_dir),
             resolver: AccountResolver::new(ReadBack {
                 store: store.clone(),
                 written: written.clone(),
             }),
             written,
             store,
-            read: HashSet::new(),
+            read: HashMap::new(),
             staged: HashMap::new(),
             dropped: HashMap::new(),
         }
@@ -214,22 +281,61 @@ impl AccountCore {
         &self.store
     }
 
-    /// Every account the vault holds. Reads no store.
+    /// Every account this app has, the ones it holds a key for first and the
+    /// ones it only observes after. Reads no store.
     pub fn accounts(&self) -> Result<Vec<AccountSummary>, CoreError> {
-        Ok(self
-            .vault
-            .accounts()?
-            .into_iter()
+        let held = self.vault.accounts()?;
+        let observed = self.observed.list()?;
+        Ok(held
+            .iter()
             .map(|held| AccountSummary {
-                resolved: self.read.contains(&held.addr),
+                managed: true,
+                resolved: self.answered(&held.addr),
                 display_name: self.live_name(&held.addr),
                 // Entries, not edits: a rename is one edit and two entries, and
                 // the number beside an account is the number it will publish.
                 pending: self.planned_entries(&held.addr).len(),
                 address: held.addr.to_string(),
                 protected: held.protected,
+                problem: self.problem(&held.addr),
             })
+            // An address whose key arrived while it was observed is managed
+            // now, and one account is one row.
+            .chain(
+                observed
+                    .iter()
+                    .filter(|addr| !held.iter().any(|held| &held.addr == *addr))
+                    .map(|addr| AccountSummary {
+                        managed: false,
+                        protected: false,
+                        resolved: self.answered(addr),
+                        display_name: self.live_name(addr),
+                        pending: 0,
+                        address: addr.to_string(),
+                        problem: self.problem(addr),
+                    }),
+            )
             .collect())
+    }
+
+    /// Start reading the log under `addr`, whose key is somewhere else.
+    /// Answers whether it was not already observed.
+    pub fn observe(&mut self, addr: &AccountAddr) -> Result<bool, CoreError> {
+        if self.manages(addr)? {
+            return Err(CoreError::AlreadyManaged);
+        }
+        Ok(self.observed.add(addr)?)
+    }
+
+    /// Stop reading the log under `addr`. What was read goes with it, and
+    /// nothing is lost that the store does not still hold.
+    pub fn stop_observing(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
+        if !self.observed.remove(addr)? {
+            return Err(CoreError::Unknown);
+        }
+        self.read.remove(addr);
+        self.dropped.remove(addr);
+        Ok(())
     }
 
     /// Generate an account and take it into the vault.
@@ -257,9 +363,13 @@ impl AccountCore {
                 secret_hex.len()
             )),
         })?;
-        Ok(self
+        let addr = self
             .vault
-            .create(&Ed25519SigningKey::from_bytes(&secret), password)?)
+            .create(&Ed25519SigningKey::from_bytes(&secret), password)?;
+        // Its key is here now, so it is managed rather than observed: the same
+        // account, the same log, the other group.
+        self.observed.remove(&addr)?;
+        Ok(addr)
     }
 
     /// The account's own secret, for its holder to write down. Whoever holds
@@ -269,14 +379,16 @@ impl AccountCore {
         addr: &AccountAddr,
         password: Option<&str>,
     ) -> Result<Zeroizing<String>, CoreError> {
+        self.require_managed(addr)?;
         let key = self.vault.open(addr, password)?;
         Ok(Zeroizing::new(hex::encode(
-            Zeroizing::new(key.DANGER_to_bytes()).as_slice(),
+            Zeroizing::new(*key.as_bytes()).as_slice(),
         )))
     }
 
     /// Drop the account from the vault, with everything staged for it.
     pub fn forget_account(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
         self.vault.forget(addr)?;
         self.staged.remove(addr);
         self.read.remove(addr);
@@ -289,13 +401,24 @@ impl AccountCore {
     /// were dropped since the last answer: by this read, and by the read of a
     /// publish that then failed.
     pub fn refresh(&mut self, addr: &AccountAddr) -> Result<usize, CoreError> {
+        self.require_known(addr)?;
         self.read_store(addr)?;
         Ok(self.take_dropped(addr))
     }
 
     fn read_store(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
-        self.resolver.resolve(addr)?;
-        self.read.insert(addr.clone());
+        let outcome = self.resolver.resolve(addr).map(|_| ());
+        let read = self.read.entry(addr.clone()).or_default();
+        match &outcome {
+            Ok(()) => {
+                *read = LastRead {
+                    at: Some(SystemTime::now()),
+                    problem: None,
+                }
+            }
+            Err(e) => read.problem = Some(ReadProblem::of(e)),
+        }
+        outcome?;
         self.settle(addr);
         Ok(())
     }
@@ -311,8 +434,10 @@ impl AccountCore {
             .vault
             .accounts()?
             .into_iter()
-            .find(|held| &held.addr == addr)
-            .ok_or(VaultError::NoAccount)?;
+            .find(|held| &held.addr == addr);
+        if held.is_none() && !self.observes(addr)? {
+            return Err(CoreError::Unknown);
+        }
         let record = self.record(addr);
         let log = record.map(AccountRecord::log);
 
@@ -328,8 +453,11 @@ impl AccountCore {
 
         Ok(AccountState {
             address: addr.to_string(),
-            protected: held.protected,
-            resolved: self.read.contains(addr),
+            managed: held.is_some(),
+            protected: held.is_some_and(|held| held.protected),
+            resolved: self.answered(addr),
+            read_at_ms: self.read_at(addr).map(since_epoch_ms),
+            problem: self.problem(addr),
             published: record.is_some(),
             log_bytes: record.map_or(DOMAIN_BYTES, |record| {
                 record.signed_log().payload.as_bytes().len()
@@ -352,6 +480,7 @@ impl AccountCore {
         addr: &AccountAddr,
         key_hex: &str,
     ) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
         let key = parse_installation_key(key_hex)?;
         if self
             .extendable(addr)?
@@ -376,6 +505,7 @@ impl AccountCore {
         addr: &AccountAddr,
         name: &str,
     ) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
         let name = display_name(name)?;
         self.extendable(addr)?;
         let mut staged = self.staged.get(addr).cloned().unwrap_or_default();
@@ -391,6 +521,7 @@ impl AccountCore {
 
     /// Stage a revocation of the entry at `index`, which must be live now.
     pub fn stage_revoke(&mut self, addr: &AccountAddr, index: u32) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
         let is_live = self.extendable(addr)?.is_some_and(|draft| {
             draft
                 .live_entries()
@@ -423,8 +554,10 @@ impl AccountCore {
 
     /// Throw away everything staged for `addr`. Nothing was written, so
     /// nothing is undone.
-    pub fn discard_pending(&mut self, addr: &AccountAddr) {
+    pub fn discard_pending(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
         self.staged.remove(addr);
+        Ok(())
     }
 
     /// Sign and publish every staged edit the log does not already hold, as
@@ -440,6 +573,7 @@ impl AccountCore {
         addr: &AccountAddr,
         password: Option<&str>,
     ) -> Result<Published, CoreError> {
+        self.require_managed(addr)?;
         if self.staged.get(addr).is_none_or(Vec::is_empty) {
             return Err(CoreError::NothingStaged);
         }
@@ -515,10 +649,60 @@ impl AccountCore {
         }
     }
 
+    /// Whether the store has answered for `addr` with a log this app could
+    /// use. A read that failed leaves this as it was, so the copy already on
+    /// screen stays on screen.
+    fn answered(&self, addr: &AccountAddr) -> bool {
+        self.read_at(addr).is_some()
+    }
+
+    fn read_at(&self, addr: &AccountAddr) -> Option<&SystemTime> {
+        self.read.get(addr).and_then(|read| read.at.as_ref())
+    }
+
+    fn problem(&self, addr: &AccountAddr) -> Option<ReadProblem> {
+        self.read.get(addr).and_then(|read| read.problem)
+    }
+
+    /// Whether this app holds `addr`'s key.
+    fn manages(&self, addr: &AccountAddr) -> Result<bool, CoreError> {
+        Ok(self.vault.accounts()?.iter().any(|held| &held.addr == addr))
+    }
+
+    fn observes(&self, addr: &AccountAddr) -> Result<bool, CoreError> {
+        Ok(self.observed.list()?.iter().any(|held| held == addr))
+    }
+
+    /// Refuse a write to an account whose key is elsewhere. Checked at the
+    /// call and not left to the vault, because a managed and an observed
+    /// account are one list and one screen, and the screen must not be the
+    /// only thing keeping their calls apart.
+    fn require_managed(&self, addr: &AccountAddr) -> Result<(), CoreError> {
+        // Asked in this order on purpose: the vault holding the key settles it,
+        // and a list of observed accounts that cannot be read then takes
+        // nothing away from an account whose key is right here.
+        if self.manages(addr)? {
+            return Ok(());
+        }
+        if self.observes(addr)? {
+            return Err(CoreError::NotManaged);
+        }
+        Err(CoreError::Unknown)
+    }
+
+    /// Refuse a read of an account this app was never asked to have, so a
+    /// stale address cannot make it fetch whatever it names.
+    fn require_known(&self, addr: &AccountAddr) -> Result<(), CoreError> {
+        if self.manages(addr)? || self.observes(addr)? {
+            return Ok(());
+        }
+        Err(CoreError::Unknown)
+    }
+
     /// The log the store gave for `addr` this session. The resolver keeps it
     /// past a forget, and an account imported again starts unread.
     fn record(&self, addr: &AccountAddr) -> Option<&AccountRecord> {
-        self.resolver.get(addr).filter(|_| self.read.contains(addr))
+        self.resolver.get(addr).filter(|_| self.answered(addr))
     }
 
     /// Refuse an update of `staged` that would take `addr`'s log, as last
@@ -751,6 +935,14 @@ fn invisible(c: char) -> bool {
     )
 }
 
+/// A moment as the view counts them. Saturating: a clock set before 1970
+/// makes a read look older than the app, not younger than the epoch.
+fn since_epoch_ms(read: &SystemTime) -> u64 {
+    read.duration_since(UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 pub fn parse_address(address: &str) -> Result<AccountAddr, CoreError> {
     address.trim().parse().map_err(|_| CoreError::Address)
 }
@@ -946,6 +1138,17 @@ mod tests {
         update.publish().unwrap();
     }
 
+    /// A log of one display name, signed by `key` and published nowhere.
+    fn signed_log(key: &Ed25519SigningKey, name: &str) -> SignedAccountLog {
+        let mut draft = AccountLogDraft::new();
+        draft
+            .add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text(name.into()))
+            .unwrap();
+        let payload = draft.log().encode().unwrap();
+        let signature = key.sign(payload.as_bytes());
+        SignedAccountLog { payload, signature }
+    }
+
     /// `entries` followed by notes that bring them to `size` encoded bytes.
     fn padded_to(mut entries: Vec<AccountEntry>, size: usize) -> Vec<AccountEntry> {
         let note = |text: String| {
@@ -1055,10 +1258,8 @@ mod tests {
             AccountEntry::add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text(value.into()))
         };
 
-        let mut phone = Account::from_signing_key(
-            Ed25519SigningKey::from_bytes(&key.DANGER_to_bytes()),
-            store.clone(),
-        );
+        let mut phone =
+            Account::from_signing_key(Ed25519SigningKey::from_bytes(key.as_bytes()), store.clone());
         let held = phone.update().push(name("Saro R")).publish().unwrap();
 
         let planned_on_nothing = Extending {
@@ -1234,7 +1435,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         let device = installation_key();
@@ -1264,7 +1465,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
         let device = installation_key();
         core.stage_add_installation(&addr, &hex::encode(device))
@@ -1298,7 +1499,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         publish_elsewhere(key, store, padded_to(Vec::new(), MAX_PAYLOAD_BYTES - 20));
@@ -1322,7 +1523,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
         let (first, second) = (installation_key(), installation_key());
         for device in [first, second] {
@@ -1380,7 +1581,7 @@ mod tests {
         let addr = AccountAddr::from(&key.verifying_key());
         let vault = tempfile::tempdir().unwrap();
         let mut core = AccountCore::new(vault.path(), store.clone());
-        core.import_account(&hex::encode(key.DANGER_to_bytes()), None)
+        core.import_account(&hex::encode(key.as_bytes()), None)
             .unwrap();
 
         let mut draft = AccountLogDraft::new();
@@ -1405,5 +1606,242 @@ mod tests {
             core.stage_revoke(&addr, 0),
             Err(CoreError::Unreadable)
         ));
+    }
+
+    /// One list, and the order in it is the switcher's: the accounts this app
+    /// can write first, the ones it can only read after.
+    #[test]
+    fn the_accounts_this_app_holds_come_before_the_ones_it_only_reads() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let observed = AccountAddr::from(&Ed25519SigningKey::generate().verifying_key());
+
+        assert!(core.observe(&observed).unwrap());
+        assert!(!core.observe(&observed).unwrap());
+        let held = core.create_account(None).unwrap();
+
+        let accounts = core.accounts().unwrap();
+        assert_eq!(
+            accounts
+                .iter()
+                .map(|account| (account.address.as_str(), account.managed))
+                .collect::<Vec<_>>(),
+            vec![
+                (held.to_string().as_str(), true),
+                (observed.to_string().as_str(), false)
+            ]
+        );
+        assert!(!accounts[1].protected);
+        assert_eq!(accounts[1].pending, 0);
+    }
+
+    /// The whole of observing: the log the store serves under the address,
+    /// verified against it, on the screen a managed account already has.
+    #[test]
+    fn an_observed_account_draws_the_log_without_a_key() {
+        let store = Store::from_url("memory");
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        publish_elsewhere(
+            key,
+            store.clone(),
+            vec![
+                AccountEntry::add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text("Raya".into())),
+                AccountEntry::add(
+                    SIGNER_CONTEXT.clone(),
+                    EntryData::Ed25519Key(installation_key()),
+                ),
+            ],
+        );
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), store);
+        core.observe(&addr).unwrap();
+
+        // Observed and not read yet, which is not an account holding nothing.
+        let state = core.state(&addr).unwrap();
+        assert!(!state.managed);
+        assert!(!state.resolved);
+        assert!(!state.published);
+        assert_eq!(state.read_at_ms, None);
+
+        core.refresh(&addr).unwrap();
+
+        let state = core.state(&addr).unwrap();
+        assert!(!state.managed);
+        assert!(!state.protected);
+        assert!(state.resolved);
+        assert!(state.published);
+        assert_eq!(state.display_name.as_deref(), Some("Raya"));
+        assert_eq!(state.installations.len(), 1);
+        assert_eq!(state.problem, None);
+        assert!(state.read_at_ms.is_some());
+    }
+
+    /// Every write needs the key, so every write is refused the same way,
+    /// rather than each failing in its own words wherever it reaches for one.
+    #[test]
+    fn an_observed_account_takes_no_edits() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = AccountAddr::from(&Ed25519SigningKey::generate().verifying_key());
+        core.observe(&addr).unwrap();
+
+        assert!(matches!(
+            core.stage_set_display_name(&addr, "Raya"),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.stage_add_installation(&addr, &hex::encode(installation_key())),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.stage_revoke(&addr, 0),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.discard_pending(&addr),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.publish(&addr, None),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.export_account(&addr, None),
+            Err(CoreError::NotManaged)
+        ));
+        assert!(matches!(
+            core.forget_account(&addr),
+            Err(CoreError::NotManaged)
+        ));
+    }
+
+    /// An address this app was never asked to have is refused before it
+    /// reaches the store, so a stale one cannot make it fetch what it names.
+    #[test]
+    fn an_account_neither_held_nor_observed_is_not_read_at_all() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = AccountAddr::from(&Ed25519SigningKey::generate().verifying_key());
+
+        assert!(matches!(core.refresh(&addr), Err(CoreError::Unknown)));
+        assert!(matches!(core.state(&addr), Err(CoreError::Unknown)));
+        assert!(matches!(
+            core.stage_set_display_name(&addr, "Raya"),
+            Err(CoreError::Unknown)
+        ));
+        assert!(matches!(
+            core.stop_observing(&addr),
+            Err(CoreError::Unknown)
+        ));
+    }
+
+    /// The key of an observed account arriving makes it managed, and one
+    /// account stays one row.
+    #[test]
+    fn importing_the_key_of_an_observed_account_makes_it_managed() {
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        core.observe(&addr).unwrap();
+
+        core.import_account(&hex::encode(key.as_bytes()), None)
+            .unwrap();
+
+        let accounts = core.accounts().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert!(accounts[0].managed);
+        assert!(matches!(
+            core.observe(&addr),
+            Err(CoreError::AlreadyManaged)
+        ));
+        core.stage_set_display_name(&addr, "Raya").unwrap();
+
+        // Out of the observed list, not merely hidden behind the vault: were
+        // it still in there, giving the key up would bring the account back as
+        // a row this app only reads.
+        core.forget_account(&addr).unwrap();
+        assert!(core.accounts().unwrap().is_empty());
+    }
+
+    /// Stopping leaves nothing here about the account, so observing it again
+    /// starts from the store rather than from what was already on screen.
+    #[test]
+    fn stop_observing_drops_the_account_and_what_was_read() {
+        let store = Store::from_url("memory");
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        publish_elsewhere(
+            key,
+            store.clone(),
+            vec![AccountEntry::add(
+                DISPLAY_NAME_CONTEXT.clone(),
+                EntryData::Text("Raya".into()),
+            )],
+        );
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), store);
+        core.observe(&addr).unwrap();
+        core.refresh(&addr).unwrap();
+
+        core.stop_observing(&addr).unwrap();
+
+        assert!(core.accounts().unwrap().is_empty());
+        assert!(matches!(core.state(&addr), Err(CoreError::Unknown)));
+
+        core.observe(&addr).unwrap();
+        let state = core.state(&addr).unwrap();
+        assert!(!state.resolved);
+        assert_eq!(state.display_name, None);
+    }
+
+    /// The store answered with a real log that this address did not sign. One
+    /// signature covers the whole log, so none of it is shown, and the row
+    /// says which way the read failed rather than that it failed.
+    #[test]
+    fn a_log_the_address_did_not_sign_leaves_the_account_unread() {
+        let mut store = Store::from_url("memory");
+        let addr = AccountAddr::from(&Ed25519SigningKey::generate().verifying_key());
+        store
+            .publish(&addr, &signed_log(&Ed25519SigningKey::generate(), "Raya"))
+            .unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), store);
+        core.observe(&addr).unwrap();
+
+        assert!(core.refresh(&addr).is_err());
+
+        let state = core.state(&addr).unwrap();
+        assert!(!state.resolved);
+        assert!(!state.published);
+        assert!(state.entries.is_empty());
+        assert_eq!(state.display_name, None);
+        assert_eq!(state.problem, Some(ReadProblem::Unverified));
+    }
+
+    /// A store that stops answering leaves the copy already read where it is,
+    /// and says why it is not the store's last word.
+    #[test]
+    fn a_read_that_fails_keeps_the_copy_already_read() {
+        use crate::store::tests::{answer_bytes, serve_bytes};
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        let url = serve_bytes(vec![
+            answer_bytes("200 OK", &signed_log(&key, "Raya").to_bytes()),
+            answer_bytes("503 Service Unavailable", b""),
+        ]);
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url(&url));
+        core.observe(&addr).unwrap();
+        core.refresh(&addr).unwrap();
+
+        assert!(core.refresh(&addr).is_err());
+
+        let state = core.state(&addr).unwrap();
+        assert!(state.resolved);
+        assert_eq!(state.display_name.as_deref(), Some("Raya"));
+        assert!(state.read_at_ms.is_some());
+        assert_eq!(state.problem, Some(ReadProblem::Unanswered));
     }
 }

@@ -83,7 +83,8 @@ pub extern "C" fn logos_account_core_string_free(text: *mut c_char) {
     }
 }
 
-/// `{"ok":true,"store":"…","accounts":[{address,protected,resolved,displayName,pending}]}`
+/// `{"ok":true,"store":"…","accounts":[{address,managed,protected,resolved,
+/// displayName,pending,problem}]}`
 #[no_mangle]
 pub extern "C" fn logos_account_core_accounts(core: *mut LogosAccountCore) -> *mut c_char {
     reply(core, |core| {
@@ -156,6 +157,34 @@ pub extern "C" fn logos_account_core_forget_account(
     let address = required_arg(address);
     reply(core, move |core| {
         core.forget_account(&parse_address(&address?)?)?;
+        Ok(json!({}))
+    })
+}
+
+/// Start reading the log under this address, whose key is somewhere else.
+/// `{"ok":true,"alreadyObserved":false}` for an address not observed before.
+#[no_mangle]
+pub extern "C" fn logos_account_core_observe_account(
+    core: *mut LogosAccountCore,
+    address: *const c_char,
+) -> *mut c_char {
+    let address = required_arg(address);
+    reply(core, move |core| {
+        let added = core.observe(&parse_address(&address?)?)?;
+        Ok(json!({ "alreadyObserved": !added }))
+    })
+}
+
+/// Stop reading the log under this address. Drops what was read, and nothing
+/// the store does not still hold.
+#[no_mangle]
+pub extern "C" fn logos_account_core_stop_observing(
+    core: *mut LogosAccountCore,
+    address: *const c_char,
+) -> *mut c_char {
+    let address = required_arg(address);
+    reply(core, move |core| {
+        core.stop_observing(&parse_address(&address?)?)?;
         Ok(json!({}))
     })
 }
@@ -238,7 +267,7 @@ pub extern "C" fn logos_account_core_discard_pending(
 ) -> *mut c_char {
     let address = required_arg(address);
     reply(core, move |core| {
-        core.discard_pending(&parse_address(&address?)?);
+        core.discard_pending(&parse_address(&address?)?)?;
         Ok(json!({}))
     })
 }
@@ -498,6 +527,72 @@ mod tests {
         assert_eq!(published["installations"][0]["key"], installation);
         assert!(published["pending"].as_array().unwrap().is_empty());
         assert!(published["logBytes"].as_u64().unwrap() > 0);
+
+        logos_account_core_free(core);
+    }
+
+    /// The observe route through the ABI, on the one account a hermetic test
+    /// can have a store already holding: this app's own, published and then
+    /// forgotten, which leaves the log where the store keeps it.
+    #[test]
+    fn an_observed_account_round_trips_through_the_abi() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = core(tmp.path());
+        let address = call(logos_account_core_create_account(core, std::ptr::null()))["address"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let addr = c(&address);
+        call(logos_account_core_stage_set_display_name(
+            core,
+            addr.as_ptr(),
+            c("Raya").as_ptr(),
+        ));
+        call(logos_account_core_publish(
+            core,
+            addr.as_ptr(),
+            std::ptr::null(),
+        ));
+        call(logos_account_core_forget_account(core, addr.as_ptr()));
+
+        let observed = call(logos_account_core_observe_account(core, addr.as_ptr()));
+        assert_eq!(observed["ok"], true);
+        assert_eq!(observed["alreadyObserved"], false);
+        assert_eq!(
+            call(logos_account_core_observe_account(core, addr.as_ptr()))["alreadyObserved"],
+            true
+        );
+
+        let listed = call(logos_account_core_accounts(core))["accounts"][0].clone();
+        assert_eq!(listed["address"], address.as_str());
+        assert_eq!(listed["managed"], false);
+        assert_eq!(listed["protected"], false);
+
+        assert_eq!(
+            call(logos_account_core_refresh(core, addr.as_ptr()))["ok"],
+            true
+        );
+        let state = call(logos_account_core_state(core, addr.as_ptr()))["state"].clone();
+        assert_eq!(state["managed"], false);
+        assert_eq!(state["displayName"], "Raya");
+        assert!(state["readAtMs"].as_u64().unwrap() > 0);
+        assert_eq!(state["problem"], serde_json::Value::Null);
+
+        let refused = call(logos_account_core_stage_set_display_name(
+            core,
+            addr.as_ptr(),
+            c("Saro").as_ptr(),
+        ));
+        assert_eq!(refused["ok"], false);
+
+        assert_eq!(
+            call(logos_account_core_stop_observing(core, addr.as_ptr()))["ok"],
+            true
+        );
+        assert!(call(logos_account_core_accounts(core))["accounts"]
+            .as_array()
+            .unwrap()
+            .is_empty());
 
         logos_account_core_free(core);
     }

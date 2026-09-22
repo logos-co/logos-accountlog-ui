@@ -38,6 +38,23 @@ QtObject {
         return plural(count, "entry", "entries")
     }
 
+    // How long ago `ms` was: a read is either recent enough to be measured in
+    // minutes or old enough that the clock time is what matters. `now` is
+    // passed in rather than read here, since a binding cannot depend on a
+    // clock that no property changes.
+    function since(ms, now) {
+        var seconds = Math.max(0, Math.round((now - ms) / 1000))
+        if (seconds < 90)
+            return qsTr("just now")
+        var minutes = Math.round(seconds / 60)
+        if (minutes < 60)
+            return plural(minutes, qsTr("minute ago"), qsTr("minutes ago"))
+        var hours = Math.round(minutes / 60)
+        if (hours < 24)
+            return plural(hours, qsTr("hour ago"), qsTr("hours ago"))
+        return qsTr("at %1").arg(new Date(ms).toLocaleString(Qt.locale(), Locale.ShortFormat))
+    }
+
     // `#7`: the index a revocation targets, in the one spelling the whole app
     // uses for it.
     function index(value) {

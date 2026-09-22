@@ -357,9 +357,13 @@ pub(crate) mod tests {
         assert_eq!(store.fetch(&addr).unwrap(), Some(log));
     }
 
+    pub(crate) fn serve(answers: Vec<String>) -> String {
+        serve_bytes(answers.into_iter().map(String::into_bytes).collect())
+    }
+
     /// Answers each connection with the next canned response, after reading
     /// the whole request so the client is never cut off mid-send.
-    pub(crate) fn serve(answers: Vec<String>) -> String {
+    pub(crate) fn serve_bytes(answers: Vec<Vec<u8>>) -> String {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -379,7 +383,7 @@ pub(crate) mod tests {
                     }
                 }
                 reader.read_exact(&mut vec![0; length]).unwrap();
-                reader.into_inner().write_all(answer.as_bytes()).unwrap();
+                reader.into_inner().write_all(&answer).unwrap();
             }
         });
         url
@@ -391,6 +395,17 @@ pub(crate) mod tests {
             "HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
+    }
+
+    /// One HTTP response carrying bytes, for an artifact that is not text.
+    pub(crate) fn answer_bytes(status: &str, body: &[u8]) -> Vec<u8> {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(body);
+        response
     }
 
     pub(crate) fn json_error(status: &str, error: &str) -> String {

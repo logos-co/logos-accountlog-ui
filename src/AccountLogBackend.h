@@ -42,6 +42,8 @@ public:
     void importAccount(QString secretHex, QString password) override;
     void exportAccount(QString address, QString password) override;
     void forgetAccount(QString address) override;
+    void observeAccount(QString address) override;
+    void stopObserving(QString address) override;
     void stageAddInstallation(QString keyHex) override;
     void stageSetDisplayName(QString name) override;
     void stageRevoke(int index) override;
