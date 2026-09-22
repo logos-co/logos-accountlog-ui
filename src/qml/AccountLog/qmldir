@@ -17,6 +17,7 @@ StoreStrip 1.0 StoreStrip.qml
 Sheet 1.0 Sheet.qml
 Field 1.0 Field.qml
 Door 1.0 Door.qml
+CompactButton 1.0 CompactButton.qml
 
 AccountBar 1.0 AccountBar.qml
 SwitcherBar 1.0 SwitcherBar.qml

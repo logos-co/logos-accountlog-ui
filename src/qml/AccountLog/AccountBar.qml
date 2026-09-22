@@ -83,36 +83,32 @@ ColumnLayout {
                     : root.store.locked ? qsTr("Locked")
                     : qsTr("Unlocked")
             }
-            LogosButton {
+            CompactButton {
                 objectName: "unlockButton"
                 visible: root.store.managed && root.store.locked
                 text: qsTr("Unlock")
                 variant: LogosButton.Variant.Primary
-                compact: true
                 enabled: !root.store.busy
                 onClicked: root.unlockRequested()
             }
-            LogosButton {
+            CompactButton {
                 objectName: "exportKeyButton"
                 visible: root.store.managed
                 text: qsTr("Export key")
-                compact: true
                 enabled: !root.store.busy
                 onClicked: root.exportRequested()
             }
-            LogosButton {
+            CompactButton {
                 objectName: "forgetAccountButton"
                 visible: root.store.managed
                 text: qsTr("Forget account")
-                compact: true
                 enabled: !root.store.busy
                 onClicked: root.forgetRequested()
             }
-            LogosButton {
+            CompactButton {
                 objectName: "stopObservingButton"
                 visible: root.store.observing
                 text: qsTr("Stop observing")
-                compact: true
                 enabled: !root.store.busy
                 onClicked: root.store.backend.stopObserving(root.store.address)
             }
