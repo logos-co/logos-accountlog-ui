@@ -6,8 +6,7 @@ name: Checks
 # The QML gate needs the Logos design system on the import path. The design
 # system is static-linked into the host binary, so no built artifact carries a
 # loose QML tree; its source tree is taken instead, at the rev this flake
-# resolves through the module builder, which is the one the app is built
-# against.
+# resolves through the module builder, which is the one basecamp 0.3.0 ships.
 
 on:
   pull_request:

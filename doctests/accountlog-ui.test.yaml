@@ -75,8 +75,8 @@ sections:
     text: |
       `nix run` on this flake launches the plugin inside
       [`logos-standalone-app`](https://github.com/logos-co/logos-standalone-app),
-      the generic Qt host, built against the same design-system revision as the
-      plugin. Everything from here is the app driven through its own QML
+      the generic Qt host, built against the design-system revision basecamp
+      0.3.0 ships. Everything from here is the app driven through its own QML
       surface: no test hooks, no back doors into the library.
 
       The `walkthrough` app is what drives it. It launches the plugin headless
