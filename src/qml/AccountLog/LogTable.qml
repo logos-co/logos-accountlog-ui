@@ -24,13 +24,13 @@ ColumnLayout {
     // drift apart. `index`, `op`, `context` and `bytes` are the width of the
     // widest token each holds, measured: an index, a context and an op name are
     // each the whole content of their cell, so none of them may be cut. `state`
-    // asks for its longest sentence and falls to the width of a `Removed by
-    // #NN` badge, which loses only that sentence's tail. `data` carries the
+    // asks for its longest sentence and falls to the width of a `Superseded
+    // by #NN` badge, which loses only that sentence's tail. `data` carries the
     // value, the one thing the rest of the row does not say, so it keeps its
     // floor and takes every spare pixel.
     readonly property var widths: ({
         index: 30, op: 62, bytes: 34, context: 140,
-        state: 172, stateFloor: 108,
+        state: 172, stateFloor: 124,
         dataFloor: 140,
         rowMargin: 12
     })

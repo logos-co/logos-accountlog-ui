@@ -4,8 +4,9 @@ import QtQuick.Layouts
 import Logos.Theme
 import Logos.Controls
 
-// Set or change the name the account publishes. A rename is a pair of entries,
-// and this sheet says so before it stages them.
+// Set or change the name the account publishes. A rename appends one entry and
+// leaves the name before it in the log, and this sheet says so before it
+// stages it.
 Sheet {
     property var store: null
 
@@ -23,26 +24,15 @@ Sheet {
     // A character the core refuses, since it could not be seen for what it is.
     readonly property int moving: Fmt.movesText(field.text)
     // The name already in force once the next publish lands: saving it again
-    // would spend a removal and an entry to say nothing new.
+    // would spend an entry to say nothing new.
     readonly property bool unchanged: root.name === root.store.displayName
     // The published name while another is staged: saving it drops the rename.
     readonly property bool reverting: root.store.renaming && root.name === root.store.publishedName
-    readonly property int replaced: root.store.replacedNameIndex() >= 0
-                                    ? root.store.replacedNameIndex()
-                                    : root.liveNameIndex()
     readonly property int cost: root.store.costs.displayName + root.bytes
-                                + (root.replaced >= 0 ? root.store.costs.remove : 0)
 
     function reset() {
         field.text = root.store.displayName
         field.field.forceActiveFocus()
-    }
-
-    function liveNameIndex() {
-        for (var i = 0; i < store.entries.length; ++i)
-            if (store.entries[i].kind === "displayName" && store.entries[i].live)
-                return store.entries[i].index
-        return -1
     }
 
     onConfirmed: {
@@ -86,9 +76,9 @@ Sheet {
               ? qsTr("That is already the account's name, so there is nothing to save.")
               : root.reverting
               ? qsTr("Keeps the published name and drops the pending rename, so nothing is appended.")
-              : root.replaced >= 0
-              ? qsTr("Appends %1 bytes: a removal of entry %2 and the new name.")
-                    .arg(root.cost).arg(Fmt.index(root.replaced))
+              : root.store.publishedName !== ""
+              ? qsTr("Appends %1 bytes. \"%2\", entry %3, stays in the log as a previous alias: the newest name is the one that counts.")
+                    .arg(root.cost).arg(root.store.publishedName).arg(Fmt.index(root.store.nameIndex))
               : qsTr("Appends %1 bytes.").arg(root.cost)
     }
 }

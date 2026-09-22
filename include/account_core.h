@@ -110,8 +110,10 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 //
 // state = { address, managed, protected, resolved, readAtMs, problem,
 //           published, logBytes, maxBytes,
-//           domainBytes, displayName, installations:[{index,key}],
-//           entries:[{index,kind,context,value,live,target,bytes}],
+//           domainBytes, displayName, displayNameIndex,
+//           installations:[{index,key}],
+//           entries:[{index,kind,context,value,live,target,bytes,
+//                     supersededBy}],
 //           unreadable, pending:[…],
 //           costs:{installation,remove,displayName} }
 //
@@ -132,6 +134,10 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 // answer with a log at all. Set beside a resolved account, it says the copy on
 // screen is not the store's last word.
 //
+// Several display names can be live at once. The highest-indexed is the one
+// in force, `displayName` at `displayNameIndex`, and each earlier one carries
+// that index as `supersededBy`.
+//
 // `managed` is false for an observed account: the whole of what this app can
 // do with it is on this reply, and every call below is refused for it.
 //
@@ -146,11 +152,10 @@ char *logos_account_core_stage_add_installation(LogosAccountCore *core,
                                                 const char *address,
                                                 const char *key_hex);
 
-// Stage the display name. Replaces any name already staged: two of them in one
-// update would revoke the live name twice, which the log refuses. The live
-// name drops a staged rename, and is refused when none is staged; refused too
-// is a name that shows nothing or holds line breaks, control characters or
-// text-direction overrides.
+// Stage the display name, one entry appended after the names already live.
+// Replaces any name already staged. The name in force drops a staged rename,
+// and is refused when none is staged; refused too is a name that shows nothing
+// or holds line breaks, control characters or text-direction overrides.
 char *logos_account_core_stage_set_display_name(LogosAccountCore *core,
                                                 const char *address,
                                                 const char *name);

@@ -105,10 +105,9 @@ Panel {
         HelpText {
             Layout.fillWidth: true
             visible: root.store.managed && root.store.renaming
-            body: root.store.replacedNameIndex() >= 0
-                  ? qsTr("Replaces \"%1\", entry %2, when published.")
-                        .arg(root.store.entryValue(root.store.replacedNameIndex()))
-                        .arg(Fmt.index(root.store.replacedNameIndex()))
+            body: root.store.publishedName !== ""
+                  ? qsTr("Appended as a new entry when published. %1 stays in the log and becomes a previous alias.")
+                        .arg(Fmt.index(root.store.nameIndex))
                   : root.store.resolved
                   ? qsTr("The account's first name, when published.")
                   : qsTr("Takes effect when published.")

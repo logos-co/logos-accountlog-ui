@@ -25,6 +25,10 @@ Rectangle {
     id: root
     readonly property bool isRemoval: row.kind === "revocation"
     readonly property bool tombstoned: removedBy >= 0
+    // A live name a later one took over from: live in the log, and not the
+    // account's name.
+    readonly property bool superseded: !pending && row.supersededBy !== null
+                                       && row.supersededBy !== undefined
 
     implicitHeight: 34
     color: root.current ? Qt.rgba(Theme.palette.primary.r, Theme.palette.primary.g,
@@ -127,7 +131,14 @@ Rectangle {
             Badge {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, stateCell.width)
-                visible: !root.pending && !root.tombstoned && root.leavingBy < 0 && root.fresh
+                visible: !root.tombstoned && root.leavingBy < 0 && root.superseded
+                text: qsTr("Superseded by %1").arg(Fmt.index(root.row.supersededBy))
+            }
+            Badge {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, stateCell.width)
+                visible: !root.pending && !root.tombstoned && root.leavingBy < 0 && !root.superseded
+                         && root.fresh
                 tone: "success"
                 text: qsTr("Just published")
             }

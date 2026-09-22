@@ -140,6 +140,8 @@ QtObject {
     }
     readonly property string displayName: stagedName !== "" ? stagedName : publishedName
     readonly property bool renaming: stagedName !== ""
+    // The entry the published name is, or -1.
+    readonly property int nameIndex: state.displayNameIndex ?? -1
 
     // Indices a staged revocation points at, so the installation list and the
     // log table can mark the same entries without each deriving it.
@@ -164,15 +166,6 @@ QtObject {
         return -1
     }
 
-    // Which entry the rename staged for this account replaces, for the panel
-    // that says so in words.
-    function replacedNameIndex() {
-        for (var i = 0; i < pending.length; ++i)
-            if (pending[i].kind === "revocation" && entryKind(pending[i].target) === "displayName")
-                return pending[i].target
-        return -1
-    }
-
     // The revocation that already retired this entry, or -1. The log carries
     // the pair as an entry and its target, so the reverse lookup is here.
     function removedBy(index) {
@@ -180,19 +173,5 @@ QtObject {
             if (entries[i].kind === "revocation" && entries[i].target === index)
                 return entries[i].index
         return -1
-    }
-
-    function entryKind(index) {
-        for (var i = 0; i < entries.length; ++i)
-            if (entries[i].index === index)
-                return entries[i].kind
-        return ""
-    }
-
-    function entryValue(index) {
-        for (var i = 0; i < entries.length; ++i)
-            if (entries[i].index === index)
-                return entries[i].value
-        return ""
     }
 }

@@ -87,8 +87,8 @@ pub enum CoreError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StagedEdit {
     AddInstallation(Ed25519VerifyingKey),
-    /// Expanded at publish into a revocation of whatever name is live plus the
-    /// new one, so the live set holds exactly one name.
+    /// Appended as one more name. The profile rules make the highest-indexed
+    /// live one current, and the ones before it stay as previous aliases.
     SetDisplayName(String),
     Revoke(u32),
 }
@@ -146,7 +146,7 @@ pub struct AccountSummary {
     /// Whether the store has answered for this account since the app started,
     /// so a missing name is known to be missing.
     pub resolved: bool,
-    /// The name live in the published log, if the store has been read.
+    /// The name in force in the published log, if the store has been read.
     pub display_name: Option<String>,
     pub pending: usize,
     /// Why the last read of this account did not land, for the one badge a
@@ -181,6 +181,7 @@ pub struct AccountState {
     /// shows because the signature covers them too.
     pub domain_bytes: usize,
     pub display_name: Option<String>,
+    pub display_name_index: Option<u32>,
     pub installations: Vec<Installation>,
     pub entries: Vec<EntryRow>,
     /// Set when the published log carries an entry this build cannot read. The
@@ -212,6 +213,13 @@ pub struct Installation {
     pub key: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Name {
+    pub index: u32,
+    pub value: String,
+}
+
 /// One row of the log table: every entry the account ever wrote, in order,
 /// carrying the index a revocation targets. Also the shape of a pending entry,
 /// because a pending entry is an entry.
@@ -230,6 +238,9 @@ pub struct EntryRow {
     /// What this entry costs the log's lifetime budget. Zero for an entry this
     /// build cannot author, which appears only in a log shown by context.
     pub bytes: usize,
+    /// For a live display name a later live one supersedes, the index of the
+    /// name in force.
+    pub superseded_by: Option<u32>,
 }
 
 /// What a publish did.
@@ -292,8 +303,6 @@ impl AccountCore {
                 managed: true,
                 resolved: self.answered(&held.addr),
                 display_name: self.live_name(&held.addr),
-                // Entries, not edits: a rename is one edit and two entries, and
-                // the number beside an account is the number it will publish.
                 pending: self.planned_entries(&held.addr).len(),
                 address: held.addr.to_string(),
                 protected: held.protected,
@@ -441,7 +450,7 @@ impl AccountCore {
         let record = self.record(addr);
         let log = record.map(AccountRecord::log);
 
-        let (entries, unreadable) = match log {
+        let (mut entries, unreadable) = match log {
             None => (Vec::new(), None),
             Some(log) => match AccountLogDraft::from_log(log) {
                 Ok(draft) => (rows_from_draft(&draft), None),
@@ -450,6 +459,14 @@ impl AccountCore {
                 Err(e) => (rows_by_context(log), Some(e.to_string())),
             },
         };
+        let names = log.map(live_display_names).unwrap_or_default();
+        if let Some((current, previous)) = names.split_last() {
+            for row in &mut entries {
+                if previous.iter().any(|name| name.index == row.index) {
+                    row.superseded_by = Some(current.index);
+                }
+            }
+        }
 
         Ok(AccountState {
             address: addr.to_string(),
@@ -464,7 +481,8 @@ impl AccountCore {
             }),
             max_bytes: MAX_PAYLOAD_BYTES,
             domain_bytes: DOMAIN_BYTES,
-            display_name: log.and_then(live_display_name),
+            display_name: names.last().map(|name| name.value.clone()),
+            display_name_index: names.last().map(|name| name.index),
             installations: log.map(live_installations).unwrap_or_default(),
             pending: pending_rows(self.planned_entries(addr), entries.len() as u32),
             entries,
@@ -496,10 +514,9 @@ impl AccountCore {
         self.restage(addr, staged)
     }
 
-    /// Stage the account's display name. Replaces any name already staged:
-    /// two of them in one update would revoke the live name twice, which the
-    /// log refuses. The name in force, while another is staged, drops the
-    /// staged one.
+    /// Stage the account's display name. Replaces any name already staged, so
+    /// an update carries one. The name in force, while another is staged,
+    /// drops the staged one.
     pub fn stage_set_display_name(
         &mut self,
         addr: &AccountAddr,
@@ -580,7 +597,7 @@ impl AccountCore {
         // Before the store is read, so a wrong password costs no request.
         let key = self.vault.open(addr, password)?;
         // Planned against what the store holds now rather than what this
-        // instance last read, so a rename retires the name live there.
+        // instance last read, so the update extends the log the store holds.
         self.read_store(addr)?;
         let Some(staged) = self.staged.get(addr) else {
             return Ok(Published {
@@ -709,7 +726,7 @@ impl AccountCore {
     /// read, past its byte budget.
     fn fits(&self, addr: &AccountAddr, staged: &[StagedEdit]) -> Result<(), CoreError> {
         let mut draft = self.extendable(addr)?.unwrap_or_default();
-        for entry in self.plan(addr, staged) {
+        for entry in Self::plan(staged) {
             draft.push(entry)?;
         }
         draft.log().encode().map_err(|e| match e {
@@ -736,46 +753,19 @@ impl AccountCore {
     }
 
     /// The entries the next publish will append, in the order they are written.
-    /// Revocations first: every one targets an already-published entry, and
-    /// grouping them keeps a rename reading as a replacement.
+    /// Revocations first: every one targets an already-published entry.
     fn planned_entries(&self, addr: &AccountAddr) -> Vec<AccountEntry> {
-        self.plan(addr, self.staged.get(addr).map_or(&[], Vec::as_slice))
+        Self::plan(self.staged.get(addr).map_or(&[], Vec::as_slice))
     }
 
-    /// What an update made of `staged` would append to `addr`'s log.
-    fn plan(&self, addr: &AccountAddr, staged: &[StagedEdit]) -> Vec<AccountEntry> {
-        if staged.is_empty() {
-            return Vec::new();
-        }
-        let log = self.record(addr).map(AccountRecord::log);
-
-        let explicit: Vec<u32> = staged
+    /// What an update made of `staged` would append.
+    fn plan(staged: &[StagedEdit]) -> Vec<AccountEntry> {
+        let mut entries: Vec<AccountEntry> = staged
             .iter()
             .filter_map(|edit| match edit {
-                StagedEdit::Revoke(index) => Some(*index),
+                StagedEdit::Revoke(index) => Some(AccountEntry::Remove { index: *index }),
                 _ => None,
             })
-            .collect();
-
-        let mut removes = explicit.clone();
-        if staged
-            .iter()
-            .any(|edit| matches!(edit, StagedEdit::SetDisplayName(_)))
-        {
-            // A rename retires whatever name is live. Skipping the ones already
-            // revoked by hand keeps the update from tombstoning an entry twice,
-            // which rejects the whole log.
-            removes.extend(
-                log.map(live_display_name_indices)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|index| !explicit.contains(index)),
-            );
-        }
-
-        let mut entries: Vec<AccountEntry> = removes
-            .into_iter()
-            .map(|index| AccountEntry::Remove { index })
             .collect();
         for edit in staged {
             match edit {
@@ -950,16 +940,25 @@ pub fn parse_address(address: &str) -> Result<AccountAddr, CoreError> {
 /// The name in force: the highest-indexed live one, which is what the profile
 /// rules make current.
 fn live_display_name(log: &AccountLog) -> Option<String> {
+    live_display_names(log).pop().map(|name| name.value)
+}
+
+/// Every live name, oldest first: the name in force last, and the account's
+/// previous aliases before it.
+fn live_display_names(log: &AccountLog) -> Vec<Name> {
     log.entries_for(&DISPLAY_NAME_CONTEXT)
         .into_iter()
         .filter_map(|entry| match entry.entry {
             AccountEntry::Add {
                 data: EntryData::Text(value),
                 ..
-            } => Some(value.clone()),
+            } => Some(Name {
+                index: entry.index,
+                value: value.clone(),
+            }),
             _ => None,
         })
-        .next_back()
+        .collect()
 }
 
 /// Every key live in the log, under any context: the log refuses a key live
@@ -975,13 +974,6 @@ fn live_keys(draft: &AccountLogDraft) -> Vec<[u8; 32]> {
             } => Some(*key),
             _ => None,
         })
-        .collect()
-}
-
-fn live_display_name_indices(log: &AccountLog) -> Vec<u32> {
-    log.entries_for(&DISPLAY_NAME_CONTEXT)
-        .into_iter()
-        .map(|entry| entry.index)
         .collect()
 }
 
@@ -1029,6 +1021,7 @@ fn row_from(index: u32, entry: &AccountEntry, live: bool) -> EntryRow {
             _ => None,
         },
         bytes: entry_size(entry),
+        superseded_by: None,
     }
 }
 
@@ -1212,10 +1205,10 @@ mod tests {
     }
 
     /// Saro's laptop last read the log before Saro's phone renamed the
-    /// account, and renames it again without refreshing. It retires the
-    /// phone's name, not the one it last saw, which the phone already retired.
+    /// account, and renames it again without refreshing. Its name lands after
+    /// the phone's, and every earlier name stays live behind the newest.
     #[test]
-    fn a_rename_from_a_stale_instance_retires_the_name_live_in_the_store() {
+    fn a_rename_appends_and_leaves_the_earlier_names_live() {
         let store = Store::from_url("memory");
         let (phone_vault, laptop_vault) =
             (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -1234,21 +1227,58 @@ mod tests {
         phone.publish(&addr, None).unwrap();
 
         laptop.stage_set_display_name(&addr, "Saro P").unwrap();
+        let pending = laptop.state(&addr).unwrap().pending;
+        assert_eq!(
+            pending.iter().map(|row| row.kind).collect::<Vec<_>>(),
+            ["displayName"]
+        );
         laptop.publish(&addr, None).unwrap();
 
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Saro P"));
-        let live_names = state
-            .entries
-            .iter()
-            .filter(|row| row.kind == "displayName" && row.live)
-            .count();
-        assert_eq!(live_names, 1);
+        assert_eq!(state.display_name_index, Some(2));
+        assert_eq!(
+            state
+                .entries
+                .iter()
+                .map(|row| (row.value.as_str(), row.live, row.superseded_by))
+                .collect::<Vec<_>>(),
+            [
+                ("Saro", true, Some(2)),
+                ("Saro R", true, Some(2)),
+                ("Saro P", true, None)
+            ]
+        );
+    }
+
+    /// A previous alias is a name like any other: taking it again appends it
+    /// once more, and the newest entry is the one in force.
+    #[test]
+    fn an_earlier_name_can_be_taken_again() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = core.create_account(None).unwrap();
+        for name in ["Saro", "Raya", "Saro"] {
+            core.stage_set_display_name(&addr, name).unwrap();
+            core.publish(&addr, None).unwrap();
+        }
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(state.display_name.as_deref(), Some("Saro"));
+        assert_eq!(
+            state
+                .entries
+                .iter()
+                .map(|row| row.superseded_by)
+                .collect::<Vec<_>>(),
+            [Some(2), Some(2), None]
+        );
     }
 
     /// What the refresh before a publish cannot close: another device's first
     /// name landing between the plan and the write. The update is written on
-    /// its plan, so the store refuses it rather than holding two names.
+    /// its plan, so the store refuses it rather than taking a plan made for
+    /// another log.
     #[test]
     fn an_update_the_store_has_moved_past_is_refused() {
         let store = Store::from_url("memory");
