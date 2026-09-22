@@ -88,6 +88,7 @@ QtObject {
     readonly property bool observing: !managed
     readonly property bool busy: (ready && backend ? backend.busy : false) || loading
     readonly property var entries: state.entries || []
+    readonly property var otherEntries: state.otherEntries || []
     readonly property var installations: state.installations || []
     readonly property var pending: state.pending || []
     readonly property int logBytes: state.logBytes || 0
@@ -142,6 +143,8 @@ QtObject {
     readonly property bool renaming: stagedName !== ""
     // The entry the published name is, or -1.
     readonly property int nameIndex: state.displayNameIndex ?? -1
+    // The live names before the published one, newest first.
+    readonly property var previousNames: state.previousNames || []
 
     // Indices a staged revocation points at, so the installation list and the
     // log table can mark the same entries without each deriving it.

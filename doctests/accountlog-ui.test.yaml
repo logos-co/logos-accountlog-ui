@@ -171,10 +171,10 @@ sections:
               # assertion is only worth making on a string nothing else renders.
               # These four are the log table's own cells plus the count replayed
               # from them, so they hold only where a row was really drawn.
-              # `Saro` and `chat.signer` would not do: the switcher carries the
-              # name, and the Installations panel names the context in its own
-              # help line whether or not anything was endorsed.
-              texts: ["#1", "profile.displayname", "48", "1 live"]
+              # `Saro` and a context would not do: the account bar and the
+              # Profile section carry the name, and each section names its
+              # contexts in its heading whether or not anything was written.
+              texts: ["#1", "28", "48", "1 live"]
               timeout: 90000
               text: |
                 The same log, captured by this run rather than by the one the

@@ -139,11 +139,11 @@ async function confirm(insp, sheet) {
   if (refused) throw new Error(`${sheet} was refused: ${refused}`);
 }
 
-// The roster is behind the bar that names the account, which is the one
+// The roster hangs from the selector in the account bar, which is the one
 // control on this screen that is not a button.
 async function openSwitcher(insp) {
   await click(insp, "switcherBar");
-  await waitUntil(insp, "switcher.open", true);
+  await waitUntil(insp, "accountBar.switcherOpen", true);
 }
 
 const PASSWORD = "a long quiet sentence";

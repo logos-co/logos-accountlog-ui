@@ -11,6 +11,7 @@ Rectangle {
     property alias text: value.text
 
     id: root
+    implicitWidth: row.implicitWidth + 20
     implicitHeight: Math.max(36, value.implicitHeight + 16)
     color: Theme.palette.backgroundMuted
     border.width: 1
@@ -18,6 +19,7 @@ Rectangle {
     radius: Theme.spacing.radiusSmall
 
     RowLayout {
+        id: row
         anchors.fill: parent
         anchors.leftMargin: 10
         anchors.rightMargin: 10
@@ -39,6 +41,7 @@ Rectangle {
         LogosButton {
             Layout.alignment: Qt.AlignVCenter
             text: qsTr("Copy")
+            compact: true
             onClicked: {
                 value.selectAll()
                 value.copy()

@@ -10,6 +10,7 @@ Badge 1.0 Badge.qml
 ContextChip 1.0 ContextChip.qml
 ValueBox 1.0 ValueBox.qml
 Panel 1.0 Panel.qml
+Subsection 1.0 Subsection.qml
 Meter 1.0 Meter.qml
 NoticeBar 1.0 NoticeBar.qml
 StoreStrip 1.0 StoreStrip.qml
@@ -17,9 +18,12 @@ Sheet 1.0 Sheet.qml
 Field 1.0 Field.qml
 Door 1.0 Door.qml
 
+AccountBar 1.0 AccountBar.qml
 SwitcherBar 1.0 SwitcherBar.qml
 SwitcherRow 1.0 SwitcherRow.qml
-AccountPanel 1.0 AccountPanel.qml
+ProfileSection 1.0 ProfileSection.qml
+ChatSection 1.0 ChatSection.qml
+OtherContexts 1.0 OtherContexts.qml
 InstallationList 1.0 InstallationList.qml
 InstallationRow 1.0 InstallationRow.qml
 ReadingNotes 1.0 ReadingNotes.qml

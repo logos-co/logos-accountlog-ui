@@ -111,10 +111,10 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 // state = { address, managed, protected, resolved, readAtMs, problem,
 //           published, logBytes, maxBytes,
 //           domainBytes, displayName, displayNameIndex,
-//           installations:[{index,key}],
+//           previousNames:[{index,value}], installations:[{index,key}],
 //           entries:[{index,kind,context,value,live,target,bytes,
 //                     supersededBy}],
-//           unreadable, pending:[…],
+//           otherEntries:[…], unreadable, pending:[…],
 //           costs:{installation,remove,displayName} }
 //
 // `entries` is every entry the account ever wrote, in order, each carrying the
@@ -136,7 +136,10 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 //
 // Several display names can be live at once. The highest-indexed is the one
 // in force, `displayName` at `displayNameIndex`, and each earlier one carries
-// that index as `supersededBy`.
+// that index as `supersededBy`; `previousNames` lists the earlier ones newest
+// first. `installations` is newest first too. `otherEntries` holds the live
+// entries, in the shape of `entries`, under a namespace other than the two
+// this app writes, profile and chat.
 //
 // `managed` is false for an observed account: the whole of what this app can
 // do with it is on this reply, and every call below is refused for it.

@@ -7,10 +7,10 @@ import Logos.Controls
 
 import AccountLog
 
-// The account the switcher names, the live set replayed from its log, and the
-// log itself. One screen serves both kinds of account: an account this module
-// holds the key for is the whole of it, and one it only observes is the same
-// screen with every control that needs a key taken out.
+// The account the bar names, one section per namespace replayed from its log,
+// and the log itself. One screen serves both kinds of account: an account this
+// module holds the key for is the whole of it, and one it only observes is the
+// same screen with every control that needs a key taken out.
 //
 // One screen at a time, chosen by what this module has and what the person
 // last asked for.
@@ -184,44 +184,48 @@ Item {
         onCancelled: view.screen = "add"
     }
 
-    RowLayout {
+    ColumnLayout {
         objectName: "managePane"
         anchors.fill: parent
         anchors.margins: Theme.spacing.large
         visible: view.usable && view.activeScreen === "manage" && view.hasAccounts
-        spacing: Theme.spacing.large
+        spacing: Theme.spacing.medium
 
-        ColumnLayout {
-            // The maximum is what actually holds the column at this width: a
-            // nested layout holding a filling child asks to expand, and without
-            // a cap it takes the log's half of the screen with it.
-            //
-            // The minimum is where it stops giving way to the log: below it the
-            // installation list cuts the abbreviated keys it shows, whereas
-            // everything given up above it costs the address box another
-            // wrapped line, which it already takes at 420.
-            Layout.preferredWidth: 420
-            Layout.maximumWidth: 420
-            Layout.minimumWidth: 320
-            Layout.fillHeight: true
-            spacing: Theme.spacing.medium
-
-            // Outside the scroll view below, so the bar naming the account
-            // stays put while the panels under it scroll.
-            SwitcherBar {
-                id: switcher
-                Layout.fillWidth: true
-                store: store
-                onAddAccountRequested: view.screen = "add"
-                onObserveAccountRequested: {
-                    observeAccountSheet.open()
-                    observeAccountSheet.reset()
-                }
+        // Above both columns, so the account stays put while the sections
+        // under it scroll, and so it reads as what all of them belong to.
+        AccountBar {
+            id: accountBar
+            Layout.fillWidth: true
+            store: store
+            onAddAccountRequested: view.screen = "add"
+            onObserveAccountRequested: {
+                observeAccountSheet.open()
+                observeAccountSheet.reset()
             }
+            onExportRequested: {
+                exportKeySheet.open()
+                exportKeySheet.reset()
+            }
+            onForgetRequested: forgetAccountSheet.open()
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Theme.spacing.large
 
             LogosScrollView {
                 id: leftScroller
                 Layout.fillWidth: true
+                // The maximum is what actually holds the column at this width:
+                // it fills, and without a cap it takes the log's half of the
+                // screen with it.
+                //
+                // The minimum is where it stops giving way to the log: below it
+                // the installation list cuts the abbreviated keys it shows.
+                Layout.preferredWidth: 520
+                Layout.maximumWidth: 520
+                Layout.minimumWidth: 320
                 Layout.fillHeight: true
                 // This column runs past a 768-high window, and a bar hidden at
                 // rest leaves its last sentence reading as cut rather than
@@ -233,21 +237,16 @@ Item {
                     width: leftScroller.availableWidth
                     spacing: Theme.spacing.medium
 
-                    AccountPanel {
+                    ProfileSection {
                         Layout.fillWidth: true
                         store: store
                         onRenameRequested: {
                             displayNameSheet.open()
                             displayNameSheet.reset()
                         }
-                        onExportRequested: {
-                            exportKeySheet.open()
-                            exportKeySheet.reset()
-                        }
-                        onForgetRequested: forgetAccountSheet.open()
                     }
 
-                    InstallationList {
+                    ChatSection {
                         Layout.fillWidth: true
                         store: store
                         selectedIndex: view.selectedIndex
@@ -258,6 +257,12 @@ Item {
                         onSelected: (index) => view.selectedIndex = index
                     }
 
+                    OtherContexts {
+                        Layout.fillWidth: true
+                        visible: store.otherEntries.length > 0
+                        store: store
+                    }
+
                     ReadingNotes {
                         Layout.fillWidth: true
                         store: store
@@ -266,24 +271,24 @@ Item {
                     Item { Layout.fillHeight: true }
                 }
             }
-        }
 
-        LogPanel {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            store: store
-            selectedIndex: view.selectedIndex
-            firstNewIndex: store.backend ? store.backend.firstNewIndex : -1
-            onSelected: (index) => view.selectedIndex = index
-            // Read first, so the preview is of what the store holds now: an
-            // edit another device already wrote drops out of it.
-            onPublishRequested: {
-                // What the sheet's read finds is said again inside the sheet,
-                // so a notice from before it must not be.
-                store.backend.dismissNotice()
-                store.backend.refresh()
-                publishSheet.open()
-                publishSheet.reset()
+            LogPanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                store: store
+                selectedIndex: view.selectedIndex
+                firstNewIndex: store.backend ? store.backend.firstNewIndex : -1
+                onSelected: (index) => view.selectedIndex = index
+                // Read first, so the preview is of what the store holds now: an
+                // edit another device already wrote drops out of it.
+                onPublishRequested: {
+                    // What the sheet's read finds is said again inside the
+                    // sheet, so a notice from before it must not be.
+                    store.backend.dismissNotice()
+                    store.backend.refresh()
+                    publishSheet.open()
+                    publishSheet.reset()
+                }
             }
         }
     }

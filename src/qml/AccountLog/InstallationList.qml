@@ -6,15 +6,14 @@ import QtQuick.Layouts
 import Logos.Theme
 import Logos.Controls
 
-// The live set, replayed from the log: the keys this account currently
-// endorses, plus the ones this update will add or retire.
-Panel {
+// The live set under chat.signer, replayed from the log: the keys this account
+// currently endorses, plus the ones this update will add or retire.
+ColumnLayout {
     property var store: null
     // The entry the log table is scrolled to, shared so a key and its entry
     // are selected together.
     property int selectedIndex: -1
 
-    signal addRequested()
     signal selected(int index)
 
     id: root
@@ -28,16 +27,11 @@ Panel {
         return out
     }
 
-    RowLayout {
+    Subsection {
         Layout.fillWidth: true
-        spacing: Theme.spacing.small
+        label: qsTr("Installations")
+        context: "chat.signer"
 
-        LogosText {
-            text: qsTr("Installations")
-            textFormat: Text.PlainText
-            font.pixelSize: Theme.typography.subtitleText
-            font.weight: Theme.typography.weightBold
-        }
         // No log read means no live set, which is not the same claim as a
         // live set with nothing in it.
         Badge {
@@ -48,30 +42,6 @@ Panel {
             visible: root.arriving.length > 0
             tone: "pending"
             text: qsTr("+%1 pending").arg(root.arriving.length)
-        }
-        Item { Layout.fillWidth: true }
-        LogosButton {
-            objectName: "addInstallationButton"
-            visible: root.store.managed
-            text: qsTr("Add installation")
-            variant: LogosButton.Variant.Primary
-            enabled: !root.store.busy && root.store.unreadable === ""
-            onClicked: root.addRequested()
-        }
-    }
-
-    RowLayout {
-        Layout.fillWidth: true
-        // The sentence is about what this module writes, and it writes
-        // nothing here: what an observed account endorses is its own doing.
-        visible: root.store.managed
-        spacing: Theme.spacing.tiny
-
-        HelpText { body: qsTr("Keys live under") }
-        ContextChip { text: "chat.signer" }
-        HelpText {
-            Layout.fillWidth: true
-            body: qsTr("and each is one entry in the log.")
         }
     }
 

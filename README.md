@@ -18,6 +18,7 @@ What the current pane does, in full:
 - endorse an installation's public key under `chat.signer`, and revoke one;
 - set the account's display name under `profile.displayname`, which appends
   the new name and leaves the earlier ones readable as previous aliases;
+- list the live entries under any other namespace, read only;
 - publish the staged entries, signing the whole log;
 - create an account, import one made elsewhere, export its key, forget it;
 - observe an account by address, read its log, and stop.

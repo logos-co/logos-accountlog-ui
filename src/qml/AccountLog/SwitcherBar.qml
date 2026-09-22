@@ -7,9 +7,8 @@ import QtQuick.Layouts
 import Logos.Theme
 import Logos.Controls
 
-// Exactly one thing on this screen names the account, and it is this bar:
-// choosing an account changes the whole screen, not just the panel beneath it.
-// Nothing below repeats the name.
+// The account's name, and the list of every other: choosing an account changes
+// the whole screen, every section and the log.
 //
 // Both kinds of account are in the one list, under a heading each that says
 // what the word means: two words picked out of a list cannot teach a reader
@@ -23,7 +22,11 @@ Item {
     signal observeAccountRequested()
 
     id: root
-    implicitHeight: 56
+    implicitWidth: Math.max(260, root.naturalWidth)
+    implicitHeight: 48
+
+    // The width the name and the caret need, which the bar pads out to 260.
+    readonly property real naturalWidth: content.implicitWidth + 26
 
     // The popup is the one place that knows whether it is up, since the close
     // policy can take it down without asking anything here.
@@ -32,9 +35,9 @@ Item {
     Rectangle {
         id: bar
         anchors.fill: parent
-        color: Theme.palette.backgroundSecondary
+        color: Theme.palette.backgroundMuted
         border.width: 1
-        border.color: root.open ? Theme.palette.overlayOrange : Theme.palette.border
+        border.color: root.open ? Theme.palette.overlayOrange : Theme.palette.borderSubtle
         radius: Theme.spacing.radiusLarge
 
         MouseArea {
@@ -44,55 +47,46 @@ Item {
         }
 
         RowLayout {
+            id: content
             anchors.fill: parent
-            anchors.leftMargin: 20
-            anchors.rightMargin: 16
+            anchors.leftMargin: 14
+            anchors.rightMargin: 12
             spacing: Theme.spacing.medium
 
-            // Fills only as far as the name reaches, and gives way first: the
-            // count and caret beside it are the bar's own controls. Rounded up,
-            // since the layout rounds a width down and a name a fraction of a
-            // pixel short of its own width elides.
-            LogosText {
-                readonly property bool named: root.store.displayName !== ""
-
-                // An account with no name is its address: a bar saying
-                // "Unnamed account" names nothing at all, and the address is
-                // what the account actually is.
-                text: root.store.loading ? qsTr("Loading")
-                    : named ? root.store.displayName
-                    : Fmt.mid(root.store.address, 10)
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
+            ColumnLayout {
                 Layout.fillWidth: true
-                Layout.maximumWidth: Math.ceil(implicitWidth)
-                font.family: named ? Theme.typography.publicSans : Theme.typography.mono
-                font.pixelSize: named ? Theme.typography.panelTitleText
-                                      : Theme.typography.subtitleText
-                font.weight: named ? Theme.typography.weightBold
-                                   : Theme.typography.weightRegular
-                color: named ? Theme.palette.text : Theme.palette.textSecondary
-            }
+                spacing: 1
 
-            // The two can never appear together: an account with no key here
-            // can stage nothing, so Read only sits where Pending would.
-            Badge {
-                visible: root.store.observing
-                text: qsTr("Read only")
-            }
-            Badge {
-                visible: !root.store.observing && root.store.renaming
-                tone: "pending"
-                text: qsTr("Pending")
-            }
+                // Gives way first: the caret beside it is the bar's own
+                // control. Rounded up, since the layout rounds a width down and
+                // a name a fraction of a pixel short of its own width elides.
+                LogosText {
+                    readonly property bool named: root.store.displayName !== ""
 
-            Item { Layout.fillWidth: true }
+                    // An account with no name is its address: a bar saying
+                    // "Unnamed account" names nothing at all, and the address
+                    // is what the account actually is.
+                    text: root.store.loading ? qsTr("Loading")
+                        : named ? root.store.displayName
+                        : Fmt.mid(root.store.address, 8)
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Math.ceil(implicitWidth)
+                    font.family: named ? Theme.typography.publicSans : Theme.typography.mono
+                    font.pixelSize: named ? Theme.typography.subtitleText
+                                          : Theme.typography.primaryText
+                    font.weight: named ? Theme.typography.weightBold
+                                       : Theme.typography.weightRegular
+                    color: named ? Theme.palette.text : Theme.palette.textSecondary
+                }
 
-            LogosText {
-                text: Fmt.plural(root.store.accounts.length, qsTr("account"), qsTr("accounts"))
-                textFormat: Text.PlainText
-                font.pixelSize: Theme.typography.secondaryText
-                color: Theme.palette.textTertiary
+                LogosText {
+                    text: Fmt.plural(root.store.accounts.length, qsTr("account"), qsTr("accounts"))
+                    textFormat: Text.PlainText
+                    font.pixelSize: 11
+                    color: Theme.palette.textTertiary
+                }
             }
 
             // A caret, drawn: the icon set carries no chevron.
@@ -117,7 +111,7 @@ Item {
     Popup {
         id: popover
         y: bar.height + Theme.spacing.small
-        width: root.width
+        width: 420
         padding: 6
         // OutsideParent, not Outside: the bar is this popup's parent, so a
         // click on it is left to the toggle above rather than closing here and

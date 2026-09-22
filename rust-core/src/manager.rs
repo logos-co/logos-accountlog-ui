@@ -182,8 +182,15 @@ pub struct AccountState {
     pub domain_bytes: usize,
     pub display_name: Option<String>,
     pub display_name_index: Option<u32>,
+    /// The live names before the display name, newest first: the account's
+    /// previous aliases.
+    pub previous_names: Vec<Name>,
+    /// Newest entry first.
     pub installations: Vec<Installation>,
     pub entries: Vec<EntryRow>,
+    /// The live entries under namespaces this app has no editor for, in log
+    /// order.
+    pub other_entries: Vec<EntryRow>,
     /// Set when the published log carries an entry this build cannot read. The
     /// log is then shown by context only, and cannot be extended at all.
     pub unreadable: Option<String>,
@@ -223,7 +230,7 @@ pub struct Name {
 /// One row of the log table: every entry the account ever wrote, in order,
 /// carrying the index a revocation targets. Also the shape of a pending entry,
 /// because a pending entry is an entry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryRow {
     pub index: u32,
@@ -459,14 +466,21 @@ impl AccountCore {
                 Err(e) => (rows_by_context(log), Some(e.to_string())),
             },
         };
-        let names = log.map(live_display_names).unwrap_or_default();
-        if let Some((current, previous)) = names.split_last() {
+        let mut previous_names = log.map(live_display_names).unwrap_or_default();
+        let name = previous_names.pop();
+        previous_names.reverse();
+        if let Some(name) = &name {
             for row in &mut entries {
-                if previous.iter().any(|name| name.index == row.index) {
-                    row.superseded_by = Some(current.index);
+                if previous_names.iter().any(|alias| alias.index == row.index) {
+                    row.superseded_by = Some(name.index);
                 }
             }
         }
+        let other_entries = entries
+            .iter()
+            .filter(|row| row.live && row.context.as_deref().is_some_and(|c| !edited_here(c)))
+            .cloned()
+            .collect();
 
         Ok(AccountState {
             address: addr.to_string(),
@@ -481,11 +495,13 @@ impl AccountCore {
             }),
             max_bytes: MAX_PAYLOAD_BYTES,
             domain_bytes: DOMAIN_BYTES,
-            display_name: names.last().map(|name| name.value.clone()),
-            display_name_index: names.last().map(|name| name.index),
+            display_name_index: name.as_ref().map(|name| name.index),
+            display_name: name.map(|name| name.value),
+            previous_names,
             installations: log.map(live_installations).unwrap_or_default(),
             pending: pending_rows(self.planned_entries(addr), entries.len() as u32),
             entries,
+            other_entries,
             unreadable,
             costs: *ENTRY_COSTS,
         })
@@ -980,6 +996,7 @@ fn live_keys(draft: &AccountLogDraft) -> Vec<[u8; 32]> {
 fn live_installations(log: &AccountLog) -> Vec<Installation> {
     log.entries_for(&SIGNER_CONTEXT)
         .into_iter()
+        .rev()
         .filter_map(|entry| match entry.entry {
             AccountEntry::Add {
                 data: EntryData::Ed25519Key(key),
@@ -1036,6 +1053,21 @@ fn rows_by_context(log: &AccountLog) -> Vec<EntryRow> {
         .collect();
     rows.sort_by_key(|row| row.index);
     rows
+}
+
+/// Whether `context` is under a namespace this app writes: the namespace of
+/// a context it edits.
+fn edited_here(context: &str) -> bool {
+    [&*DISPLAY_NAME_CONTEXT, &*SIGNER_CONTEXT]
+        .iter()
+        .any(|edited| namespace(edited.as_str()) == namespace(context))
+}
+
+/// What comes before a context's first dot.
+fn namespace(context: &str) -> &str {
+    context
+        .split_once('.')
+        .map_or(context, |(namespace, _)| namespace)
 }
 
 fn context_of(entry: &AccountEntry) -> Option<&Context> {
@@ -1237,6 +1269,14 @@ mod tests {
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Saro P"));
         assert_eq!(state.display_name_index, Some(2));
+        assert_eq!(
+            state
+                .previous_names
+                .iter()
+                .map(|alias| (alias.index, alias.value.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "Saro R"), (0, "Saro")]
+        );
         assert_eq!(
             state
                 .entries
@@ -1454,6 +1494,73 @@ mod tests {
         core.stage_set_display_name(&addr, "Raya").unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
         assert!(core.state(&addr).unwrap().pending.is_empty());
+    }
+
+    /// The live set is listed newest first, the way the entries that arrive
+    /// next are.
+    #[test]
+    fn installations_are_listed_newest_entry_first() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = core.create_account(None).unwrap();
+        for _ in 0..2 {
+            core.stage_add_installation(&addr, &hex::encode(installation_key()))
+                .unwrap();
+        }
+        core.publish(&addr, None).unwrap();
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(
+            state
+                .installations
+                .iter()
+                .map(|installation| installation.index)
+                .collect::<Vec<_>>(),
+            [1, 0]
+        );
+    }
+
+    /// What another application wrote under its own namespace is listed
+    /// apart, as long as it is live, and nothing under profile or chat is.
+    #[test]
+    fn live_entries_under_other_namespaces_are_listed_apart() {
+        let store = Store::from_url("memory");
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        let note = |text: &str| {
+            AccountEntry::add(
+                Context::new("elsewhere.note").unwrap(),
+                EntryData::Text(text.into()),
+            )
+        };
+        publish_elsewhere(
+            key,
+            store.clone(),
+            vec![
+                AccountEntry::add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text("Raya".into())),
+                note("revoked"),
+                AccountEntry::add(
+                    SIGNER_CONTEXT.clone(),
+                    EntryData::Ed25519Key(installation_key()),
+                ),
+                note("kept"),
+                AccountEntry::Remove { index: 1 },
+            ],
+        );
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), store);
+        core.observe(&addr).unwrap();
+        core.refresh(&addr).unwrap();
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(
+            state
+                .other_entries
+                .iter()
+                .map(|row| (row.index, row.context.as_deref(), row.value.as_str()))
+                .collect::<Vec<_>>(),
+            [(3, Some("elsewhere.note"), "kept")]
+        );
     }
 
     /// A key live under a context this app does not write still makes the
