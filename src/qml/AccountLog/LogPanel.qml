@@ -40,6 +40,7 @@ Panel {
                     font.pixelSize: Theme.typography.subtitleText
                     font.weight: Theme.typography.weightBold
                 }
+                ContextChip { text: "logos:accounts:1" }
                 // A count of nothing is not the same claim as no count: an
                 // account whose log was never read has neither.
                 Badge {

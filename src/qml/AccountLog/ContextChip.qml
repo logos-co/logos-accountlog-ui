@@ -3,8 +3,9 @@ import QtQuick
 import Logos.Theme
 import Logos.Controls
 
-// A context, verbatim and in monospace. Contexts are byte-compared by the log,
-// so they are shown exactly as written and never prettified.
+// A context, or the domain a log opens with, verbatim and in monospace. The
+// log compares both byte for byte, so they are shown exactly as written and
+// never prettified.
 Rectangle {
     property alias text: label.text
 

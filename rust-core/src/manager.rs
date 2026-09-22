@@ -184,9 +184,6 @@ pub struct AccountState {
     pub published: bool,
     pub log_bytes: usize,
     pub max_bytes: usize,
-    /// The bytes the payload spends before its first entry, which the table
-    /// shows because the signature covers them too.
-    pub domain_bytes: usize,
     pub display_name: Option<String>,
     pub display_name_index: Option<u32>,
     /// The live names before the display name, newest first: the account's
@@ -527,7 +524,6 @@ impl AccountCore {
                 record.signed_log().payload.as_bytes().len()
             }),
             max_bytes: MAX_PAYLOAD_BYTES,
-            domain_bytes: DOMAIN_BYTES,
             display_name_index: name.as_ref().map(|name| name.index),
             display_name: name.map(|name| name.value),
             previous_names,

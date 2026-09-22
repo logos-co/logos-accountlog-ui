@@ -97,7 +97,6 @@ QtObject {
     readonly property var pending: state.pending || []
     readonly property int logBytes: state.logBytes || 0
     readonly property int maxBytes: state.maxBytes || Fmt.maxBytes
-    readonly property int domainBytes: state.domainBytes || 0
     readonly property bool published: state.published === true
     // The store has answered for this account, so `published` is its answer
     // rather than a default.

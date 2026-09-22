@@ -119,7 +119,7 @@ char *logos_account_core_refresh(LogosAccountCore *core, const char *address);
 //
 // state = { address, managed, protected, locked, resolved, readAtMs, problem,
 //           published, logBytes, maxBytes,
-//           domainBytes, displayName, displayNameIndex,
+//           displayName, displayNameIndex,
 //           previousNames:[{index,value}], installations:[{index,key}],
 //           entries:[{index,kind,context,value,live,target,bytes,
 //                     supersededBy}],
