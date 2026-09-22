@@ -139,11 +139,11 @@ async function confirm(insp, sheet) {
   if (refused) throw new Error(`${sheet} was refused: ${refused}`);
 }
 
-// The roster is behind the bar that names the account, which is the one
+// The roster hangs from the selector in the account bar, which is the one
 // control on this screen that is not a button.
 async function openSwitcher(insp) {
   await click(insp, "switcherBar");
-  await waitUntil(insp, "switcher.open", true);
+  await waitUntil(insp, "accountBar.switcherOpen", true);
 }
 
 const PASSWORD = "a long quiet sentence";
@@ -317,12 +317,11 @@ async function main() {
   app.disconnect();
 }
 
-// Sign and send the staged entries as one update. The key is sealed, so the
-// sheet asks for the password that opens it.
+// Sign and send the staged entries as one update. The key is sealed, and was
+// unlocked by making the account, so the sheet asks for nothing.
 async function publish(insp) {
   await click(insp, "publishButton");
   await waitUntil(insp, "publishSheet.visible", true);
-  await type(insp, "publishPasswordField", PASSWORD);
   await confirm(insp, "publishSheet");
   await waitUntil(insp, "store.pending.length", 0);
 }

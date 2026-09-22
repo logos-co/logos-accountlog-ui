@@ -3,13 +3,12 @@ import QtQuick.Layouts
 
 import Logos.Theme
 
-// Three sentences, each saying something no badge on this screen can: what
-// makes a key live, where a change goes before it is published, and what
-// publishing will ask of this particular account.
+// Sentences that each say something no badge on this screen can: what a
+// section above is, and where a change goes before it is published.
 //
-// For an account this module only reads, the three are about the reading
-// instead: what the signature covers, whose draft this is not, and what
-// observing costs the account being observed.
+// For an account this module only reads, three about the reading instead: what
+// the signature covers, whose draft this is not, and what observing costs the
+// account being observed.
 ColumnLayout {
     property var store: null
 
@@ -21,8 +20,8 @@ ColumnLayout {
     HelpText {
         Layout.fillWidth: true
         visible: root.store.managed
-        lead: qsTr("An installation is live ")
-        body: qsTr("while no removal in the log points at its entry. A removed key stays in the log, dimmed, and can be added again as a new entry.")
+        lead: qsTr("A section is a namespace ")
+        body: qsTr("in the account's log. The account above owns all of them; each section writes only its own contexts.")
     }
 
     HelpText {
@@ -30,15 +29,6 @@ ColumnLayout {
         visible: root.store.managed
         lead: qsTr("Changes are staged ")
         body: qsTr("as pending entries at the end of the log, and published together as one update.")
-    }
-
-    HelpText {
-        Layout.fillWidth: true
-        visible: root.store.managed
-        lead: qsTr("Publishing ")
-        body: root.store.isProtected
-              ? qsTr("signs the whole log and sends it to the store. This account is password protected, so it asks for the password first.")
-              : qsTr("signs the whole log and sends it to the store. This account has no password, so it publishes straight away.")
     }
 
     HelpText {

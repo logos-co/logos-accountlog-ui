@@ -52,6 +52,8 @@ pub enum CoreError {
     Unknown,
     #[error("this app holds no key for that account, so it cannot write its log")]
     NotManaged,
+    #[error("this account is locked: unlock it with its password to sign")]
+    Locked,
     #[error("this app holds that account's key, so it is managed rather than observed")]
     AlreadyManaged,
     /// A caller reached the C ABI without one of the strings it names.
@@ -87,8 +89,8 @@ pub enum CoreError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StagedEdit {
     AddInstallation(Ed25519VerifyingKey),
-    /// Expanded at publish into a revocation of whatever name is live plus the
-    /// new one, so the live set holds exactly one name.
+    /// Appended as one more name. The profile rules make the highest-indexed
+    /// live one current, and the ones before it stay as previous aliases.
     SetDisplayName(String),
     Revoke(u32),
 }
@@ -143,10 +145,12 @@ pub struct AccountSummary {
     /// Whether opening the key takes a password. False for an observed
     /// account, which has no key here to open.
     pub protected: bool,
+    /// Whether the key is sealed and not unlocked this session.
+    pub locked: bool,
     /// Whether the store has answered for this account since the app started,
     /// so a missing name is known to be missing.
     pub resolved: bool,
-    /// The name live in the published log, if the store has been read.
+    /// The name in force in the published log, if the store has been read.
     pub display_name: Option<String>,
     pub pending: usize,
     /// Why the last read of this account did not land, for the one badge a
@@ -163,6 +167,9 @@ pub struct AccountState {
     /// this draws can write.
     pub managed: bool,
     pub protected: bool,
+    /// Whether the key is sealed and not unlocked this session, so nothing can
+    /// be signed until it is.
+    pub locked: bool,
     /// Whether the store has answered for this account since the app started.
     /// Distinguishes "nothing published" from "could not ask".
     pub resolved: bool,
@@ -181,8 +188,16 @@ pub struct AccountState {
     /// shows because the signature covers them too.
     pub domain_bytes: usize,
     pub display_name: Option<String>,
+    pub display_name_index: Option<u32>,
+    /// The live names before the display name, newest first: the account's
+    /// previous aliases.
+    pub previous_names: Vec<Name>,
+    /// Newest entry first.
     pub installations: Vec<Installation>,
     pub entries: Vec<EntryRow>,
+    /// The live entries under namespaces this app has no editor for, in log
+    /// order.
+    pub other_entries: Vec<EntryRow>,
     /// Set when the published log carries an entry this build cannot read. The
     /// log is then shown by context only, and cannot be extended at all.
     pub unreadable: Option<String>,
@@ -212,10 +227,17 @@ pub struct Installation {
     pub key: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Name {
+    pub index: u32,
+    pub value: String,
+}
+
 /// One row of the log table: every entry the account ever wrote, in order,
 /// carrying the index a revocation targets. Also the shape of a pending entry,
 /// because a pending entry is an entry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryRow {
     pub index: u32,
@@ -230,6 +252,9 @@ pub struct EntryRow {
     /// What this entry costs the log's lifetime budget. Zero for an entry this
     /// build cannot author, which appears only in a log shown by context.
     pub bytes: usize,
+    /// For a live display name a later live one supersedes, the index of the
+    /// name in force.
+    pub superseded_by: Option<u32>,
 }
 
 /// What a publish did.
@@ -256,6 +281,10 @@ pub struct AccountCore {
     /// Staged edits a read dropped that no answer has counted yet: a publish
     /// that fails after its read leaves them to the next refresh.
     dropped: HashMap<AccountAddr, usize>,
+    /// The sealed keys opened this session. Boxed so the map moves only the
+    /// pointer: a key moved by a resize or a removal would leave its bytes in
+    /// memory freed without being cleared.
+    unlocked: HashMap<AccountAddr, Box<Ed25519SigningKey>>,
 }
 
 impl AccountCore {
@@ -274,6 +303,7 @@ impl AccountCore {
             read: HashMap::new(),
             staged: HashMap::new(),
             dropped: HashMap::new(),
+            unlocked: HashMap::new(),
         }
     }
 
@@ -292,11 +322,10 @@ impl AccountCore {
                 managed: true,
                 resolved: self.answered(&held.addr),
                 display_name: self.live_name(&held.addr),
-                // Entries, not edits: a rename is one edit and two entries, and
-                // the number beside an account is the number it will publish.
                 pending: self.planned_entries(&held.addr).len(),
                 address: held.addr.to_string(),
                 protected: held.protected,
+                locked: held.protected && !self.unlocked.contains_key(&held.addr),
                 problem: self.problem(&held.addr),
             })
             // An address whose key arrived while it was observed is managed
@@ -308,6 +337,7 @@ impl AccountCore {
                     .map(|addr| AccountSummary {
                         managed: false,
                         protected: false,
+                        locked: false,
                         resolved: self.answered(addr),
                         display_name: self.live_name(addr),
                         pending: 0,
@@ -338,17 +368,22 @@ impl AccountCore {
         Ok(())
     }
 
-    /// Generate an account and take it into the vault.
-    pub fn create_account(&self, password: Option<&str>) -> Result<AccountAddr, CoreError> {
-        Ok(self
-            .vault
-            .create(&Ed25519SigningKey::generate(), password)?)
+    /// Generate an account and take it into the vault. A sealed one is
+    /// unlocked for the session, since its password was just given.
+    pub fn create_account(&mut self, password: Option<&str>) -> Result<AccountAddr, CoreError> {
+        let key = Box::new(Ed25519SigningKey::generate());
+        let addr = self.vault.create(&key, password)?;
+        if password.is_some() {
+            self.unlocked.insert(addr.clone(), key);
+        }
+        Ok(addr)
     }
 
     /// Take an account this app did not generate, from the 32-byte secret its
-    /// holder exported.
+    /// holder exported. A sealed one is unlocked for the session, as a created
+    /// one is.
     pub fn import_account(
-        &self,
+        &mut self,
         secret_hex: &str,
         password: Option<&str>,
     ) -> Result<AccountAddr, CoreError> {
@@ -363,9 +398,11 @@ impl AccountCore {
                 secret_hex.len()
             )),
         })?;
-        let addr = self
-            .vault
-            .create(&Ed25519SigningKey::from_bytes(&secret), password)?;
+        let key = Box::new(Ed25519SigningKey::from_bytes(&secret));
+        let addr = self.vault.create(&key, password)?;
+        if password.is_some() {
+            self.unlocked.insert(addr.clone(), key);
+        }
         // Its key is here now, so it is managed rather than observed: the same
         // account, the same log, the other group.
         self.observed.remove(&addr)?;
@@ -386,10 +423,20 @@ impl AccountCore {
         )))
     }
 
+    /// Open the sealed key of `addr` and hold it until the core is dropped, so
+    /// a publish asks for no password. An export still does.
+    pub fn unlock(&mut self, addr: &AccountAddr, password: &str) -> Result<(), CoreError> {
+        self.require_managed(addr)?;
+        let key = Box::new(self.vault.open(addr, Some(password))?);
+        self.unlocked.insert(addr.clone(), key);
+        Ok(())
+    }
+
     /// Drop the account from the vault, with everything staged for it.
     pub fn forget_account(&mut self, addr: &AccountAddr) -> Result<(), CoreError> {
         self.require_managed(addr)?;
         self.vault.forget(addr)?;
+        self.unlocked.remove(addr);
         self.staged.remove(addr);
         self.read.remove(addr);
         self.dropped.remove(addr);
@@ -441,7 +488,7 @@ impl AccountCore {
         let record = self.record(addr);
         let log = record.map(AccountRecord::log);
 
-        let (entries, unreadable) = match log {
+        let (mut entries, unreadable) = match log {
             None => (Vec::new(), None),
             Some(log) => match AccountLogDraft::from_log(log) {
                 Ok(draft) => (rows_from_draft(&draft), None),
@@ -450,11 +497,28 @@ impl AccountCore {
                 Err(e) => (rows_by_context(log), Some(e.to_string())),
             },
         };
+        let mut previous_names = log.map(live_display_names).unwrap_or_default();
+        let name = previous_names.pop();
+        previous_names.reverse();
+        if let Some(name) = &name {
+            for row in &mut entries {
+                if previous_names.iter().any(|alias| alias.index == row.index) {
+                    row.superseded_by = Some(name.index);
+                }
+            }
+        }
+        let other_entries = entries
+            .iter()
+            .filter(|row| row.live && row.context.as_deref().is_some_and(|c| !edited_here(c)))
+            .cloned()
+            .collect();
 
+        let protected = held.as_ref().is_some_and(|held| held.protected);
         Ok(AccountState {
             address: addr.to_string(),
             managed: held.is_some(),
-            protected: held.is_some_and(|held| held.protected),
+            protected,
+            locked: protected && !self.unlocked.contains_key(addr),
             resolved: self.answered(addr),
             read_at_ms: self.read_at(addr).map(since_epoch_ms),
             problem: self.problem(addr),
@@ -464,10 +528,13 @@ impl AccountCore {
             }),
             max_bytes: MAX_PAYLOAD_BYTES,
             domain_bytes: DOMAIN_BYTES,
-            display_name: log.and_then(live_display_name),
+            display_name_index: name.as_ref().map(|name| name.index),
+            display_name: name.map(|name| name.value),
+            previous_names,
             installations: log.map(live_installations).unwrap_or_default(),
             pending: pending_rows(self.planned_entries(addr), entries.len() as u32),
             entries,
+            other_entries,
             unreadable,
             costs: *ENTRY_COSTS,
         })
@@ -496,10 +563,9 @@ impl AccountCore {
         self.restage(addr, staged)
     }
 
-    /// Stage the account's display name. Replaces any name already staged:
-    /// two of them in one update would revoke the live name twice, which the
-    /// log refuses. The name in force, while another is staged, drops the
-    /// staged one.
+    /// Stage the account's display name. Replaces any name already staged, so
+    /// an update carries one. The name in force, while another is staged,
+    /// drops the staged one.
     pub fn stage_set_display_name(
         &mut self,
         addr: &AccountAddr,
@@ -568,19 +634,15 @@ impl AccountCore {
     ///
     /// A store that already holds every staged edit is not a failure: the
     /// update is simply not needed.
-    pub fn publish(
-        &mut self,
-        addr: &AccountAddr,
-        password: Option<&str>,
-    ) -> Result<Published, CoreError> {
+    pub fn publish(&mut self, addr: &AccountAddr) -> Result<Published, CoreError> {
         self.require_managed(addr)?;
         if self.staged.get(addr).is_none_or(Vec::is_empty) {
             return Err(CoreError::NothingStaged);
         }
-        // Before the store is read, so a wrong password costs no request.
-        let key = self.vault.open(addr, password)?;
+        // Before the store is read, so a locked account costs no request.
+        let key = self.signing_key(addr)?;
         // Planned against what the store holds now rather than what this
-        // instance last read, so a rename retires the name live there.
+        // instance last read, so the update extends the log the store holds.
         self.read_store(addr)?;
         let Some(staged) = self.staged.get(addr) else {
             return Ok(Published {
@@ -673,6 +735,18 @@ impl AccountCore {
         Ok(self.observed.list()?.iter().any(|held| held == addr))
     }
 
+    /// A copy of the key unlocked for `addr`, or its unsealed key from the
+    /// vault. A sealed key not unlocked is refused rather than asked for.
+    fn signing_key(&self, addr: &AccountAddr) -> Result<Ed25519SigningKey, CoreError> {
+        if let Some(key) = self.unlocked.get(addr) {
+            return Ok(Ed25519SigningKey::clone(key));
+        }
+        self.vault.open(addr, None).map_err(|e| match e {
+            VaultError::PasswordRequired => CoreError::Locked,
+            e => e.into(),
+        })
+    }
+
     /// Refuse a write to an account whose key is elsewhere. Checked at the
     /// call and not left to the vault, because a managed and an observed
     /// account are one list and one screen, and the screen must not be the
@@ -709,7 +783,7 @@ impl AccountCore {
     /// read, past its byte budget.
     fn fits(&self, addr: &AccountAddr, staged: &[StagedEdit]) -> Result<(), CoreError> {
         let mut draft = self.extendable(addr)?.unwrap_or_default();
-        for entry in self.plan(addr, staged) {
+        for entry in Self::plan(staged) {
             draft.push(entry)?;
         }
         draft.log().encode().map_err(|e| match e {
@@ -736,46 +810,19 @@ impl AccountCore {
     }
 
     /// The entries the next publish will append, in the order they are written.
-    /// Revocations first: every one targets an already-published entry, and
-    /// grouping them keeps a rename reading as a replacement.
+    /// Revocations first: every one targets an already-published entry.
     fn planned_entries(&self, addr: &AccountAddr) -> Vec<AccountEntry> {
-        self.plan(addr, self.staged.get(addr).map_or(&[], Vec::as_slice))
+        Self::plan(self.staged.get(addr).map_or(&[], Vec::as_slice))
     }
 
-    /// What an update made of `staged` would append to `addr`'s log.
-    fn plan(&self, addr: &AccountAddr, staged: &[StagedEdit]) -> Vec<AccountEntry> {
-        if staged.is_empty() {
-            return Vec::new();
-        }
-        let log = self.record(addr).map(AccountRecord::log);
-
-        let explicit: Vec<u32> = staged
+    /// What an update made of `staged` would append.
+    fn plan(staged: &[StagedEdit]) -> Vec<AccountEntry> {
+        let mut entries: Vec<AccountEntry> = staged
             .iter()
             .filter_map(|edit| match edit {
-                StagedEdit::Revoke(index) => Some(*index),
+                StagedEdit::Revoke(index) => Some(AccountEntry::Remove { index: *index }),
                 _ => None,
             })
-            .collect();
-
-        let mut removes = explicit.clone();
-        if staged
-            .iter()
-            .any(|edit| matches!(edit, StagedEdit::SetDisplayName(_)))
-        {
-            // A rename retires whatever name is live. Skipping the ones already
-            // revoked by hand keeps the update from tombstoning an entry twice,
-            // which rejects the whole log.
-            removes.extend(
-                log.map(live_display_name_indices)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|index| !explicit.contains(index)),
-            );
-        }
-
-        let mut entries: Vec<AccountEntry> = removes
-            .into_iter()
-            .map(|index| AccountEntry::Remove { index })
             .collect();
         for edit in staged {
             match edit {
@@ -950,16 +997,25 @@ pub fn parse_address(address: &str) -> Result<AccountAddr, CoreError> {
 /// The name in force: the highest-indexed live one, which is what the profile
 /// rules make current.
 fn live_display_name(log: &AccountLog) -> Option<String> {
+    live_display_names(log).pop().map(|name| name.value)
+}
+
+/// Every live name, oldest first: the name in force last, and the account's
+/// previous aliases before it.
+fn live_display_names(log: &AccountLog) -> Vec<Name> {
     log.entries_for(&DISPLAY_NAME_CONTEXT)
         .into_iter()
         .filter_map(|entry| match entry.entry {
             AccountEntry::Add {
                 data: EntryData::Text(value),
                 ..
-            } => Some(value.clone()),
+            } => Some(Name {
+                index: entry.index,
+                value: value.clone(),
+            }),
             _ => None,
         })
-        .next_back()
+        .collect()
 }
 
 /// Every key live in the log, under any context: the log refuses a key live
@@ -978,16 +1034,10 @@ fn live_keys(draft: &AccountLogDraft) -> Vec<[u8; 32]> {
         .collect()
 }
 
-fn live_display_name_indices(log: &AccountLog) -> Vec<u32> {
-    log.entries_for(&DISPLAY_NAME_CONTEXT)
-        .into_iter()
-        .map(|entry| entry.index)
-        .collect()
-}
-
 fn live_installations(log: &AccountLog) -> Vec<Installation> {
     log.entries_for(&SIGNER_CONTEXT)
         .into_iter()
+        .rev()
         .filter_map(|entry| match entry.entry {
             AccountEntry::Add {
                 data: EntryData::Ed25519Key(key),
@@ -1029,6 +1079,7 @@ fn row_from(index: u32, entry: &AccountEntry, live: bool) -> EntryRow {
             _ => None,
         },
         bytes: entry_size(entry),
+        superseded_by: None,
     }
 }
 
@@ -1043,6 +1094,21 @@ fn rows_by_context(log: &AccountLog) -> Vec<EntryRow> {
         .collect();
     rows.sort_by_key(|row| row.index);
     rows
+}
+
+/// Whether `context` is under a namespace this app writes: the namespace of
+/// a context it edits.
+fn edited_here(context: &str) -> bool {
+    [&*DISPLAY_NAME_CONTEXT, &*SIGNER_CONTEXT]
+        .iter()
+        .any(|edited| namespace(edited.as_str()) == namespace(context))
+}
+
+/// What comes before a context's first dot.
+fn namespace(context: &str) -> &str {
+    context
+        .split_once('.')
+        .map_or(context, |(namespace, _)| namespace)
 }
 
 fn context_of(entry: &AccountEntry) -> Option<&Context> {
@@ -1212,10 +1278,10 @@ mod tests {
     }
 
     /// Saro's laptop last read the log before Saro's phone renamed the
-    /// account, and renames it again without refreshing. It retires the
-    /// phone's name, not the one it last saw, which the phone already retired.
+    /// account, and renames it again without refreshing. Its name lands after
+    /// the phone's, and every earlier name stays live behind the newest.
     #[test]
-    fn a_rename_from_a_stale_instance_retires_the_name_live_in_the_store() {
+    fn a_rename_appends_and_leaves_the_earlier_names_live() {
         let store = Store::from_url("memory");
         let (phone_vault, laptop_vault) =
             (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -1227,28 +1293,73 @@ mod tests {
         laptop.import_account(&secret, None).unwrap();
 
         phone.stage_set_display_name(&addr, "Saro").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         laptop.refresh(&addr).unwrap();
 
         phone.stage_set_display_name(&addr, "Saro R").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
 
         laptop.stage_set_display_name(&addr, "Saro P").unwrap();
-        laptop.publish(&addr, None).unwrap();
+        let pending = laptop.state(&addr).unwrap().pending;
+        assert_eq!(
+            pending.iter().map(|row| row.kind).collect::<Vec<_>>(),
+            ["displayName"]
+        );
+        laptop.publish(&addr).unwrap();
 
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Saro P"));
-        let live_names = state
-            .entries
-            .iter()
-            .filter(|row| row.kind == "displayName" && row.live)
-            .count();
-        assert_eq!(live_names, 1);
+        assert_eq!(state.display_name_index, Some(2));
+        assert_eq!(
+            state
+                .previous_names
+                .iter()
+                .map(|alias| (alias.index, alias.value.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "Saro R"), (0, "Saro")]
+        );
+        assert_eq!(
+            state
+                .entries
+                .iter()
+                .map(|row| (row.value.as_str(), row.live, row.superseded_by))
+                .collect::<Vec<_>>(),
+            [
+                ("Saro", true, Some(2)),
+                ("Saro R", true, Some(2)),
+                ("Saro P", true, None)
+            ]
+        );
+    }
+
+    /// A previous alias is a name like any other: taking it again appends it
+    /// once more, and the newest entry is the one in force.
+    #[test]
+    fn an_earlier_name_can_be_taken_again() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = core.create_account(None).unwrap();
+        for name in ["Saro", "Raya", "Saro"] {
+            core.stage_set_display_name(&addr, name).unwrap();
+            core.publish(&addr).unwrap();
+        }
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(state.display_name.as_deref(), Some("Saro"));
+        assert_eq!(
+            state
+                .entries
+                .iter()
+                .map(|row| row.superseded_by)
+                .collect::<Vec<_>>(),
+            [Some(2), Some(2), None]
+        );
     }
 
     /// What the refresh before a publish cannot close: another device's first
     /// name landing between the plan and the write. The update is written on
-    /// its plan, so the store refuses it rather than holding two names.
+    /// its plan, so the store refuses it rather than taking a plan made for
+    /// another log.
     #[test]
     fn an_update_the_store_has_moved_past_is_refused() {
         let store = Store::from_url("memory");
@@ -1281,8 +1392,8 @@ mod tests {
         [tempfile::TempDir; 2],
     ) {
         let vaults = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
-        let phone = AccountCore::new(vaults[0].path(), store.clone());
-        let laptop = AccountCore::new(vaults[1].path(), store.clone());
+        let mut phone = AccountCore::new(vaults[0].path(), store.clone());
+        let mut laptop = AccountCore::new(vaults[1].path(), store.clone());
         let addr = phone.create_account(None).unwrap();
         let secret = phone.export_account(&addr, None).unwrap();
         laptop.import_account(&secret, None).unwrap();
@@ -1299,7 +1410,7 @@ mod tests {
         let key = hex::encode(installation_key());
 
         phone.stage_set_display_name(&addr, "Saro").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         laptop.refresh(&addr).unwrap();
 
         for device in [&mut laptop, &mut phone] {
@@ -1307,13 +1418,10 @@ mod tests {
             device.stage_add_installation(&addr, &key).unwrap();
         }
         laptop.stage_set_display_name(&addr, "Raya").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
 
         assert_eq!(laptop.refresh(&addr).unwrap(), 2);
-        assert_eq!(
-            laptop.publish(&addr, None).unwrap().first_new_index,
-            Some(3)
-        );
+        assert_eq!(laptop.publish(&addr).unwrap().first_new_index, Some(3));
         let state = laptop.state(&addr).unwrap();
         assert_eq!(state.display_name.as_deref(), Some("Raya"));
         assert_eq!(state.installations.len(), 1);
@@ -1321,9 +1429,9 @@ mod tests {
 
         phone.stage_set_display_name(&addr, "Pax").unwrap();
         laptop.stage_set_display_name(&addr, "Pax").unwrap();
-        phone.publish(&addr, None).unwrap();
+        phone.publish(&addr).unwrap();
         assert_eq!(
-            laptop.publish(&addr, None).unwrap(),
+            laptop.publish(&addr).unwrap(),
             Published {
                 first_new_index: None,
                 dropped: 1
@@ -1346,7 +1454,7 @@ mod tests {
         let addr = core.create_account(None).unwrap();
 
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        assert_eq!(core.publish(&addr, None).unwrap().first_new_index, Some(0));
+        assert_eq!(core.publish(&addr).unwrap().first_new_index, Some(0));
         let state = core.state(&addr).unwrap();
         assert!(state.published);
         assert_eq!(state.display_name.as_deref(), Some("Saro"));
@@ -1415,7 +1523,7 @@ mod tests {
         let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
         let addr = core.create_account(None).unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        core.publish(&addr, None).unwrap();
+        core.publish(&addr).unwrap();
 
         assert!(matches!(
             core.stage_set_display_name(&addr, "  Saro "),
@@ -1424,6 +1532,73 @@ mod tests {
         core.stage_set_display_name(&addr, "Raya").unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
         assert!(core.state(&addr).unwrap().pending.is_empty());
+    }
+
+    /// The live set is listed newest first, the way the entries that arrive
+    /// next are.
+    #[test]
+    fn installations_are_listed_newest_entry_first() {
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
+        let addr = core.create_account(None).unwrap();
+        for _ in 0..2 {
+            core.stage_add_installation(&addr, &hex::encode(installation_key()))
+                .unwrap();
+        }
+        core.publish(&addr).unwrap();
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(
+            state
+                .installations
+                .iter()
+                .map(|installation| installation.index)
+                .collect::<Vec<_>>(),
+            [1, 0]
+        );
+    }
+
+    /// What another application wrote under its own namespace is listed
+    /// apart, as long as it is live, and nothing under profile or chat is.
+    #[test]
+    fn live_entries_under_other_namespaces_are_listed_apart() {
+        let store = Store::from_url("memory");
+        let key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&key.verifying_key());
+        let note = |text: &str| {
+            AccountEntry::add(
+                Context::new("elsewhere.note").unwrap(),
+                EntryData::Text(text.into()),
+            )
+        };
+        publish_elsewhere(
+            key,
+            store.clone(),
+            vec![
+                AccountEntry::add(DISPLAY_NAME_CONTEXT.clone(), EntryData::Text("Raya".into())),
+                note("revoked"),
+                AccountEntry::add(
+                    SIGNER_CONTEXT.clone(),
+                    EntryData::Ed25519Key(installation_key()),
+                ),
+                note("kept"),
+                AccountEntry::Remove { index: 1 },
+            ],
+        );
+        let vault = tempfile::tempdir().unwrap();
+        let mut core = AccountCore::new(vault.path(), store);
+        core.observe(&addr).unwrap();
+        core.refresh(&addr).unwrap();
+
+        let state = core.state(&addr).unwrap();
+        assert_eq!(
+            state
+                .other_entries
+                .iter()
+                .map(|row| (row.index, row.context.as_deref(), row.value.as_str()))
+                .collect::<Vec<_>>(),
+            [(3, Some("elsewhere.note"), "kept")]
+        );
     }
 
     /// A key live under a context this app does not write still makes the
@@ -1481,7 +1656,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            core.publish(&addr, None).unwrap(),
+            core.publish(&addr).unwrap(),
             Published {
                 first_new_index: None,
                 dropped: 1
@@ -1538,10 +1713,7 @@ mod tests {
             padded_to(vec![endorsed], MAX_PAYLOAD_BYTES - 20),
         );
 
-        assert!(matches!(
-            core.publish(&addr, None),
-            Err(CoreError::OverBudget)
-        ));
+        assert!(matches!(core.publish(&addr), Err(CoreError::OverBudget)));
         assert_eq!(core.state(&addr).unwrap().pending.len(), 1);
         assert_eq!(core.refresh(&addr).unwrap(), 1);
     }
@@ -1554,7 +1726,7 @@ mod tests {
         let mut core = AccountCore::new(vault.path(), Store::from_url("memory"));
         let addr = core.create_account(None).unwrap();
         core.stage_set_display_name(&addr, "Saro").unwrap();
-        core.publish(&addr, None).unwrap();
+        core.publish(&addr).unwrap();
         let secret = core.export_account(&addr, None).unwrap();
         core.forget_account(&addr).unwrap();
         core.import_account(&secret, None).unwrap();
@@ -1702,10 +1874,7 @@ mod tests {
             core.discard_pending(&addr),
             Err(CoreError::NotManaged)
         ));
-        assert!(matches!(
-            core.publish(&addr, None),
-            Err(CoreError::NotManaged)
-        ));
+        assert!(matches!(core.publish(&addr), Err(CoreError::NotManaged)));
         assert!(matches!(
             core.export_account(&addr, None),
             Err(CoreError::NotManaged)

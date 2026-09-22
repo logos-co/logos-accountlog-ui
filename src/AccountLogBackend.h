@@ -41,6 +41,7 @@ public:
     void createAccount(QString password) override;
     void importAccount(QString secretHex, QString password) override;
     void exportAccount(QString address, QString password) override;
+    void unlock(QString address, QString password) override;
     void forgetAccount(QString address) override;
     void observeAccount(QString address) override;
     void stopObserving(QString address) override;
@@ -48,7 +49,7 @@ public:
     void stageSetDisplayName(QString name) override;
     void stageRevoke(int index) override;
     void discardPending() override;
-    void publish(QString password) override;
+    void publish() override;
     void dismissNotice() override;
 
     /// Where this app keeps account keys. `LOGOS_ACCOUNTLOG_VAULT_DIR` if it is

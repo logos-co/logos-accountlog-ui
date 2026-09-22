@@ -83,8 +83,8 @@ pub extern "C" fn logos_account_core_string_free(text: *mut c_char) {
     }
 }
 
-/// `{"ok":true,"store":"…","accounts":[{address,managed,protected,resolved,
-/// displayName,pending,problem}]}`
+/// `{"ok":true,"store":"…","accounts":[{address,managed,protected,locked,
+/// resolved,displayName,pending,problem}]}`
 #[no_mangle]
 pub extern "C" fn logos_account_core_accounts(core: *mut LogosAccountCore) -> *mut c_char {
     reply(core, |core| {
@@ -145,6 +145,22 @@ pub extern "C" fn logos_account_core_export_account(
         let (addr, password) = (parse_address(&address?)?, password?);
         let key = core.export_account(&addr, password.as_deref().map(String::as_str))?;
         Ok(json!({ "key": key.as_str() }))
+    })
+}
+
+/// Open a sealed account's key for as long as the handle lives, so a publish
+/// asks for no password.
+#[no_mangle]
+pub extern "C" fn logos_account_core_unlock(
+    core: *mut LogosAccountCore,
+    address: *const c_char,
+    password: *const c_char,
+) -> *mut c_char {
+    let address = required_arg(address);
+    let password = required_arg(password);
+    reply(core, move |core| {
+        core.unlock(&parse_address(&address?)?, &password?)?;
+        Ok(json!({}))
     })
 }
 
@@ -278,13 +294,10 @@ pub extern "C" fn logos_account_core_discard_pending(
 pub extern "C" fn logos_account_core_publish(
     core: *mut LogosAccountCore,
     address: *const c_char,
-    password: *const c_char,
 ) -> *mut c_char {
     let address = required_arg(address);
-    let password = optional_arg(password);
     reply(core, move |core| {
-        let (addr, password) = (parse_address(&address?)?, password?);
-        let published = core.publish(&addr, password.as_deref().map(String::as_str))?;
+        let published = core.publish(&parse_address(&address?)?)?;
         Ok(json!({
             "firstNewIndex": published.first_new_index,
             "dropped": published.dropped,
@@ -478,6 +491,97 @@ mod tests {
         logos_account_core_free(core);
     }
 
+    /// A sealed account is unlocked by the call that gave its password, and a
+    /// new handle over the same vault starts locked. An export asks for the
+    /// password whether or not the account is unlocked.
+    #[test]
+    fn a_sealed_account_is_unlocked_once_per_handle() {
+        let locked = |core, addr: &CString| {
+            call(logos_account_core_state(core, addr.as_ptr()))["state"]["locked"].clone()
+        };
+        let stage_and_publish = |core, addr: &CString, name: &str| {
+            call(logos_account_core_stage_set_display_name(
+                core,
+                addr.as_ptr(),
+                c(name).as_ptr(),
+            ));
+            call(logos_account_core_publish(core, addr.as_ptr()))["ok"].clone()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let first = core(tmp.path());
+        let created = call(logos_account_core_create_account(first, c("pw").as_ptr()));
+        let addr = c(created["address"].as_str().unwrap());
+        assert_eq!(locked(first, &addr), false);
+        assert_eq!(stage_and_publish(first, &addr, "Saro"), true);
+        let key = call(logos_account_core_export_account(
+            first,
+            addr.as_ptr(),
+            std::ptr::null(),
+        ));
+        assert_eq!(key["ok"], false);
+        let key = call(logos_account_core_export_account(
+            first,
+            addr.as_ptr(),
+            c("pw").as_ptr(),
+        ));
+        logos_account_core_free(first);
+
+        let again = core(tmp.path());
+        assert_eq!(locked(again, &addr), true);
+        assert_eq!(
+            call(logos_account_core_accounts(again))["accounts"][0]["locked"],
+            true
+        );
+        assert_eq!(stage_and_publish(again, &addr, "Raya"), false);
+        let wrong = call(logos_account_core_unlock(
+            again,
+            addr.as_ptr(),
+            c("pq").as_ptr(),
+        ));
+        assert_eq!(wrong["ok"], false);
+        assert_eq!(locked(again, &addr), true);
+        let unlocked = call(logos_account_core_unlock(
+            again,
+            addr.as_ptr(),
+            c("pw").as_ptr(),
+        ));
+        assert_eq!(unlocked["ok"], true);
+        assert_eq!(locked(again, &addr), false);
+        assert_eq!(
+            call(logos_account_core_publish(again, addr.as_ptr()))["ok"],
+            true
+        );
+        logos_account_core_free(again);
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let other = core(elsewhere.path());
+        call(logos_account_core_import_account(
+            other,
+            c(key["key"].as_str().unwrap()).as_ptr(),
+            c("pw").as_ptr(),
+        ));
+        assert_eq!(locked(other, &addr), false);
+        logos_account_core_free(other);
+    }
+
+    /// An unsealed key opens without a password, so there is nothing to unlock.
+    #[test]
+    fn an_unsealed_account_is_never_locked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = core(tmp.path());
+        let created = call(logos_account_core_create_account(core, std::ptr::null()));
+        let addr = c(created["address"].as_str().unwrap());
+        let state = call(logos_account_core_state(core, addr.as_ptr()))["state"].clone();
+        assert_eq!(state["locked"], false);
+        let refused = call(logos_account_core_unlock(
+            core,
+            addr.as_ptr(),
+            c("pw").as_ptr(),
+        ));
+        assert_eq!(refused["ok"], false);
+        logos_account_core_free(core);
+    }
+
     /// One trip through the whole surface, in the order the Manage pane makes
     /// the calls.
     #[test]
@@ -513,11 +617,7 @@ mod tests {
         assert_eq!(staged["state"]["published"], false);
 
         assert_eq!(
-            call(logos_account_core_publish(
-                core,
-                addr.as_ptr(),
-                std::ptr::null()
-            ))["ok"],
+            call(logos_account_core_publish(core, addr.as_ptr()))["ok"],
             true
         );
 
@@ -548,11 +648,7 @@ mod tests {
             addr.as_ptr(),
             c("Raya").as_ptr(),
         ));
-        call(logos_account_core_publish(
-            core,
-            addr.as_ptr(),
-            std::ptr::null(),
-        ));
+        call(logos_account_core_publish(core, addr.as_ptr()));
         call(logos_account_core_forget_account(core, addr.as_ptr()));
 
         let observed = call(logos_account_core_observe_account(core, addr.as_ptr()));

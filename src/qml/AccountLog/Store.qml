@@ -80,6 +80,10 @@ QtObject {
         return null
     }
     readonly property bool isProtected: held !== null && held.protected === true
+    // Sealed, and not unlocked this session: it can stage and cannot publish.
+    // Read from the listing, like the protection, so it is right while the
+    // state is still on its way.
+    readonly property bool locked: held !== null && held.locked === true
     // Whether this module holds the key, and so whether anything on screen can
     // write. An account whose state has not landed counts as managed: every
     // control is disabled while `loading`, and the read-only screen must not
@@ -88,6 +92,7 @@ QtObject {
     readonly property bool observing: !managed
     readonly property bool busy: (ready && backend ? backend.busy : false) || loading
     readonly property var entries: state.entries || []
+    readonly property var otherEntries: state.otherEntries || []
     readonly property var installations: state.installations || []
     readonly property var pending: state.pending || []
     readonly property int logBytes: state.logBytes || 0
@@ -140,6 +145,10 @@ QtObject {
     }
     readonly property string displayName: stagedName !== "" ? stagedName : publishedName
     readonly property bool renaming: stagedName !== ""
+    // The entry the published name is, or -1.
+    readonly property int nameIndex: state.displayNameIndex ?? -1
+    // The live names before the published one, newest first.
+    readonly property var previousNames: state.previousNames || []
 
     // Indices a staged revocation points at, so the installation list and the
     // log table can mark the same entries without each deriving it.
@@ -164,15 +173,6 @@ QtObject {
         return -1
     }
 
-    // Which entry the rename staged for this account replaces, for the panel
-    // that says so in words.
-    function replacedNameIndex() {
-        for (var i = 0; i < pending.length; ++i)
-            if (pending[i].kind === "revocation" && entryKind(pending[i].target) === "displayName")
-                return pending[i].target
-        return -1
-    }
-
     // The revocation that already retired this entry, or -1. The log carries
     // the pair as an entry and its target, so the reverse lookup is here.
     function removedBy(index) {
@@ -180,19 +180,5 @@ QtObject {
             if (entries[i].kind === "revocation" && entries[i].target === index)
                 return entries[i].index
         return -1
-    }
-
-    function entryKind(index) {
-        for (var i = 0; i < entries.length; ++i)
-            if (entries[i].index === index)
-                return entries[i].kind
-        return ""
-    }
-
-    function entryValue(index) {
-        for (var i = 0; i < entries.length; ++i)
-            if (entries[i].index === index)
-                return entries[i].value
-        return ""
     }
 }

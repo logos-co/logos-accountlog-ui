@@ -16,14 +16,19 @@ kinds are in one switcher, the managed ones first.
 What the current pane does, in full:
 
 - endorse an installation's public key under `chat.signer`, and revoke one;
-- set the account's display name under `profile.displayname`, which is a
-  revocation of the live name and an addition of the new one;
+- set the account's display name under `profile.displayname`, which appends
+  the new name and leaves the earlier ones readable as previous aliases;
+- list the live entries under any other namespace, read only;
 - publish the staged entries, signing the whole log;
-- create an account, import one made elsewhere, export its key, forget it;
+- create an account, import one made elsewhere, unlock it, export its key,
+  forget it;
 - observe an account by address, read its log, and stop.
 
 A password is per account, not per module: an account can be sealed with one,
 or stored unsealed, and the screen says which at every point where it matters.
+A sealed account is unlocked once per session, by making or importing it or by
+its password after a restart, and its key stays open until the app closes, so
+publishing asks for nothing. Exporting the key asks for the password every time.
 
 ## Layout
 

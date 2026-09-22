@@ -6,8 +6,8 @@ release: ""
 intro: |
   An account, in Logos, is not a row in a table. It is an append-only **log**
   of entries, signed as a whole by one key, published under the address that
-  key derives. Nothing in it is ever deleted: retiring a name is itself an
-  entry, pointing at the one it retires.
+  key derives. Nothing in it is ever deleted: revoking a key is itself an
+  entry, pointing at the one it revokes.
 
   `accountlog_ui` is the app that writes such a log. This doc-test builds it,
   launches it headless through
@@ -171,10 +171,10 @@ sections:
               # assertion is only worth making on a string nothing else renders.
               # These four are the log table's own cells plus the count replayed
               # from them, so they hold only where a row was really drawn.
-              # `Saro` and `chat.signer` would not do: the switcher carries the
-              # name, and the Installations panel names the context in its own
-              # help line whether or not anything was endorsed.
-              texts: ["#1", "profile.displayname", "48", "1 live"]
+              # `Saro` and a context would not do: the account bar and the
+              # Profile section carry the name, and each section names its
+              # contexts in its heading whether or not anything was written.
+              texts: ["#1", "28", "48", "1 live"]
               timeout: 90000
               text: |
                 The same log, captured by this run rather than by the one the
@@ -190,8 +190,8 @@ sections:
       Two entries, 93 bytes of signed payload: a 17-byte domain prefix that
       every account log leads with, 28 for the name, 48 for the endorsement.
       The format caps the payload at 128 KiB, and that cap is a **lifetime**
-      budget, because nothing is ever removed to make room. Retiring this name
-      later costs 7 more bytes for the removal plus the new name's own.
+      budget, because nothing is ever removed to make room. A new name later
+      costs only its own entry, and `Saro` stays readable beneath it.
 
       That is why the app quotes a price before it stages an edit, and why every
       one of those numbers is measured by encoding the entry with the format's

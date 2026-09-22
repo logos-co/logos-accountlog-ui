@@ -76,7 +76,7 @@ Item {
 
         LogosText {
             Layout.fillWidth: true
-            text: qsTr("A password seals the key on this computer. It is asked for at every publish.")
+            text: qsTr("A password seals the key on this computer. The account stays unlocked until the app closes, and after that the password opens it once per session.")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: Theme.palette.textSecondary

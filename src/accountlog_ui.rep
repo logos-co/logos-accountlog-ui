@@ -37,7 +37,8 @@ class AccountLog
     PROP(bool busy=false READONLY)
 
     // Every account this app has, the ones it holds a key for first:
-    //   [{address, managed, protected, resolved, displayName, pending, problem}]
+    //   [{address, managed, protected, locked, resolved, displayName, pending,
+    //     problem}]
     PROP(QString accountsJson="[]" READONLY)
 
     // The account on screen. Empty when the vault holds none.
@@ -70,6 +71,9 @@ class AccountLog
     SLOT(void importAccount(QString secretHex, QString password))
     // Hand the account's own secret back, once, through accountExported.
     SLOT(void exportAccount(QString address, QString password))
+    // Open a sealed account's key until the app closes, so publishing asks
+    // for no password.
+    SLOT(void unlock(QString address, QString password))
     // Drop the account and its key. Nothing here can recover it.
     SLOT(void forgetAccount(QString address))
 
@@ -86,9 +90,9 @@ class AccountLog
     SLOT(void stageRevoke(int index))
     SLOT(void discardPending())
 
-    // Sign and send the staged entries as one update. The password is this
-    // account's, and is used for this publish only.
-    SLOT(void publish(QString password))
+    // Sign and send the staged entries as one update, with the key unlocked
+    // or stored unsealed.
+    SLOT(void publish())
 
     SLOT(void dismissNotice())
 

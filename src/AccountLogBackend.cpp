@@ -352,6 +352,17 @@ void AccountLogBackend::exportAccount(QString address, QString password)
          });
 }
 
+void AccountLogBackend::unlock(QString address, QString password)
+{
+    const QByteArray target = utf8(address);
+    const QByteArray pass = utf8(password);
+    call(QStringLiteral("unlock"),
+         [target, pass](LogosAccountCore *core) {
+             return logos_account_core_unlock(core, target.constData(), pass.constData());
+         },
+         [this](const QJsonObject &) { reloadAccounts(); });
+}
+
 void AccountLogBackend::forgetAccount(QString address)
 {
     const QByteArray target = utf8(address);
@@ -454,16 +465,15 @@ void AccountLogBackend::discardPending()
          [this](const QJsonObject &) { edited(); });
 }
 
-void AccountLogBackend::publish(QString password)
+void AccountLogBackend::publish()
 {
     const QString address = selectedAddress();
     const QByteArray target = utf8(address);
-    const QByteArray pass = utf8(password);
 
     setStatusText(QStringLiteral("Publishing"));
     call(QStringLiteral("publish"),
-         [target, pass](LogosAccountCore *core) {
-             return logos_account_core_publish(core, target.constData(), passwordArg(pass));
+         [target](LogosAccountCore *core) {
+             return logos_account_core_publish(core, target.constData());
          },
          [this, address](const QJsonObject &reply) {
              // Null when the store already held every staged edit.
