@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "account"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/logos-chat.git?rev=398cddbbc3795b13a52eb7f460f591597798e4b6#398cddbbc3795b13a52eb7f460f591597798e4b6"
+source = "git+https://github.com/logos-messaging/logos-chat.git?rev=8f638fcb3b5b90710b30a9816a013f5485542fb2#8f638fcb3b5b90710b30a9816a013f5485542fb2"
 dependencies = [
  "account-log",
  "thiserror 2.0.20",
@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "account-log"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/logos-chat.git?rev=398cddbbc3795b13a52eb7f460f591597798e4b6#398cddbbc3795b13a52eb7f460f591597798e4b6"
+source = "git+https://github.com/logos-messaging/logos-chat.git?rev=8f638fcb3b5b90710b30a9816a013f5485542fb2#8f638fcb3b5b90710b30a9816a013f5485542fb2"
 dependencies = [
  "ed25519-dalek",
  "hex",

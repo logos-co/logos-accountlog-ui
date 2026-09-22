@@ -43,9 +43,8 @@
 
           cargoLock = {
             lockFile = ./rust-core/Cargo.lock;
-            # The account crates are a git dependency on an unmerged branch of
-            # logos-chat, which has no hash in the lock file. Swap this for
-            # `outputHashes` once they are published or merged to main.
+            # Cargo records no checksum for a git dependency; the pure
+            # alternative is an `outputHashes` entry rewritten at every re-pin.
             allowBuiltinFetchGit = true;
           };
 
