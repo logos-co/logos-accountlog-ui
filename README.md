@@ -61,8 +61,10 @@ property.
 
 The vault is one directory holding one file per account, sealed (an
 eth-keystore v3 document) or in the clear, by that account's own choice. It
-lives under `GenericDataLocation/logos/accountlog-ui/vault`, which
-`LOGOS_ACCOUNTLOG_VAULT_DIR` overrides.
+lives in `module_data/accountlog_ui/vault` under `LOGOS_USER_DIR`, which
+basecamp sets for a `--user-dir` launch, or else under ui-host's application
+data (`~/.local/share/Logos/ui-host` on Linux). `LOGOS_ACCOUNTLOG_VAULT_DIR`
+overrides it.
 
 The observed accounts are one file in that same directory, `observed.json`: a
 list of addresses and nothing else, since an account with no key here has
