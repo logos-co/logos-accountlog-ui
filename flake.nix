@@ -4,7 +4,12 @@
   inputs = {
     # The only input. This app depends on no Logos module: everything it knows
     # about an account is in the Rust library below, linked into the plugin.
-    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    #
+    # The revision basecamp 0.3.0 builds logos-package-manager-ui with, which
+    # pins the SDK, protocol, ui-host and design system that host runs. The view
+    # compiles against the host's design system at runtime, so a control the
+    # host lacks fails qmllint and the walkthrough here.
+    logos-module-builder.url = "github:logos-co/logos-module-builder/1adcfb86d80daab42d49bb72ab06ac9737b28575";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

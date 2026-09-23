@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Layouts
 
 import Logos.Theme
-import Logos.Controls
 
 // A value shown in full and selectable: an address, an exported key. Wrapped
 // rather than elided, because the whole of it is the identifier and a column
@@ -38,10 +37,9 @@ Rectangle {
             color: Theme.palette.textTertiary
         }
 
-        LogosButton {
+        CompactButton {
             Layout.alignment: Qt.AlignVCenter
             text: qsTr("Copy")
-            compact: true
             onClicked: {
                 value.selectAll()
                 value.copy()

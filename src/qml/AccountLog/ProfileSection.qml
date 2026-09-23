@@ -94,11 +94,10 @@ Panel {
         }
         ContextChip { text: "profile" }
         Item { Layout.fillWidth: true }
-        LogosButton {
+        CompactButton {
             objectName: "displayNameButton"
             visible: root.store.managed
             text: root.store.displayName !== "" ? qsTr("Change name") : qsTr("Set a name")
-            compact: true
             enabled: !root.store.busy
             onClicked: root.renameRequested()
         }

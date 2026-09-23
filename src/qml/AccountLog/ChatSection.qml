@@ -33,12 +33,11 @@ Panel {
         }
         ContextChip { text: "chat" }
         Item { Layout.fillWidth: true }
-        LogosButton {
+        CompactButton {
             objectName: "addInstallationButton"
             visible: root.store.managed
             text: qsTr("Add installation")
             variant: LogosButton.Variant.Primary
-            compact: true
             enabled: !root.store.busy && root.store.unreadable === ""
             onClicked: root.addRequested()
         }
