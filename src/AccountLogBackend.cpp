@@ -93,11 +93,14 @@ QString AccountLogBackend::vaultDirectory()
     if (!override.isEmpty())
         return QString::fromLocal8Bit(override);
 
-    // GenericDataLocation, not AppDataLocation: a view plugin runs inside
-    // whichever host spawned it, and AppDataLocation is named after that host.
-    // The account keys belong to this app, so the path says so.
-    const QString root = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    return QDir(root).filePath(QStringLiteral("logos/accountlog-ui/vault"));
+    // A view plugin is assigned no directory, so the vault goes where a core
+    // module's would: module_data under the profile root. Basecamp exports that
+    // root as LOGOS_USER_DIR only for --user-dir (logos-basecamp#315); otherwise
+    // this is ui-host's own AppDataLocation, which every profile shares.
+    QString root = qEnvironmentVariable("LOGOS_USER_DIR");
+    if (root.isEmpty())
+        root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return QDir(root).filePath(QStringLiteral("module_data/accountlog_ui/vault"));
 }
 
 QString AccountLogBackend::configuredStoreUrl()
