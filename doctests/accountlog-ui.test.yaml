@@ -1,6 +1,6 @@
 name: "Writing an account log: a key, a name, an installation, one update"
 output: accountlog-ui.md
-project_name: logos-accountlog-ui
+project_name: logos-accounts-ui
 release: ""
 
 intro: |
@@ -49,8 +49,8 @@ sections:
       links it are versioned by one commit.
     steps:
       - title: "Build the plugin"
-        run: "nix build 'github:logos-co/logos-accountlog-ui{release}' -o result"
-        code_block: "nix build 'github:logos-co/logos-accountlog-ui' -o result"
+        run: "nix build 'github:logos-co/logos-accounts-ui{release}' -o result"
+        code_block: "nix build 'github:logos-co/logos-accounts-ui' -o result"
 
       # Its own step on purpose. The harness dispatches file / run / ui_test /
       # check_file as an if/elif chain, so a check_file sharing a step with a
@@ -161,7 +161,7 @@ sections:
           # inspector port (4768) during this (unbounded) launch wait; 3768 opens,
           # proxied onto the live window, only once the log is published, so the
           # capture below runs against the already-finished window.
-          launch: "nix run 'github:logos-co/logos-accountlog-ui{release}#walkthrough'"
+          launch: "nix run 'github:logos-co/logos-accounts-ui{release}#walkthrough'"
           launch_timeout: 1800
           tests:
             - name: "The account log, written and published"

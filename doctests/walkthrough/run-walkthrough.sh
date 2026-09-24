@@ -2,7 +2,7 @@
 # Role: headless walkthrough test driver (CI); see run-walkthrough-show.sh for the doc-test display variant.
 # Regenerate the account-log walkthrough screenshots in doctests/images.
 #
-# Launches one logos-accountlog-ui instance offscreen on an empty vault and an
+# Launches one logos-accounts-ui instance offscreen on an empty vault and an
 # in-process store, drives the whole walkthrough through its own QML surface via
 # the logos-qt-mcp inspector protocol (run-walkthrough.mjs), and writes the
 # numbered screenshots to OUT_DIR. Exits non-zero if any checkpoint is missed,

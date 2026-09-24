@@ -1,5 +1,5 @@
 {
-  description = "logos-accountlog-ui: hold an account's key, write its log, publish it.";
+  description = "logos-accounts-ui: hold an account's key, write its log, publish it.";
 
   inputs = {
     # The only input. This app depends on no Logos module: everything it knows
