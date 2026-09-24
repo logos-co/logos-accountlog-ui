@@ -52,7 +52,7 @@ view. `LOGOS_ACCOUNTLOG_STORE_URL` points the app at another store, and
 `memory` selects an in-process one; `LOGOS_ACCOUNTLOG_VAULT_DIR` moves the
 vault.
 
-The [tutorial](https://logos-co.github.io/logos-accountlog-ui/) is executable:
+The [tutorial](https://logos-co.github.io/logos-accounts-ui/) is executable:
 CI builds the app, drives it through a whole account headless and publishes
 the report. `.github/workflows/` has every check CI runs.
 

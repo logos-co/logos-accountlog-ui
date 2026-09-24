@@ -1,4 +1,4 @@
-// Write a whole account log by driving an already-running logos-accountlog-ui
+// Write a whole account log by driving an already-running logos-accounts-ui
 // instance, and capture a screenshot of each step for the docs.
 //
 // The walkthrough is a sequence of screens, and each step is finished when the
