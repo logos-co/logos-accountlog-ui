@@ -199,122 +199,141 @@ Item {
         onCancelled: view.screen = "add"
     }
 
-    ColumnLayout {
-        objectName: "managePane"
+    // Below the width the account bar and the two columns ask for, and the
+    // height the log needs, the screen scrolls rather than cut them off.
+    LogosScrollView {
+        id: manageScroller
         anchors.fill: parent
         anchors.margins: Theme.spacing.large
         visible: view.usable && view.activeScreen === "manage" && view.hasAccounts
         enabled: !view.sheetUp
-        spacing: Theme.spacing.medium
+        // The range is what the pane needs, and the pane spreads over any room
+        // left: a range that reads the view's size is a binding loop.
+        contentWidth: managePane.Layout.minimumWidth
+        contentHeight: managePane.Layout.minimumHeight
+        // Pinned where there is something to scroll, as the columns inside
+        // are: a bar hidden at rest leaves the screen reading as cut.
+        ScrollBar.horizontal.policy: manageScroller.ScrollBar.horizontal.size < 1
+                                     ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        ScrollBar.vertical.policy: manageScroller.ScrollBar.vertical.size < 1
+                                   ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
-        // Above both columns, so the account stays put while the sections
-        // under it scroll, and so it reads as what all of them belong to.
-        AccountBar {
-            id: accountBar
-            Layout.fillWidth: true
-            store: store
-            onAddAccountRequested: view.screen = "add"
-            onObserveAccountRequested: {
-                observeAccountSheet.open()
-                observeAccountSheet.reset()
-            }
-            onUnlockRequested: {
-                unlockSheet.open()
-                unlockSheet.reset()
-            }
-            onExportRequested: {
-                exportKeySheet.open()
-                exportKeySheet.reset()
-            }
-            onForgetRequested: forgetAccountSheet.open()
-        }
+        ColumnLayout {
+            id: managePane
+            objectName: "managePane"
+            width: Math.max(manageScroller.availableWidth, manageScroller.contentWidth)
+            height: Math.max(manageScroller.availableHeight, manageScroller.contentHeight)
+            spacing: Theme.spacing.medium
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: Theme.spacing.large
-
-            LogosScrollView {
-                id: leftScroller
+            // Above both columns, so the account stays put while the sections
+            // under it scroll, and so it reads as what all of them belong to.
+            AccountBar {
+                id: accountBar
                 Layout.fillWidth: true
-                // The maximum is what actually holds the column at this width:
-                // it fills, and without a cap it takes the log's half of the
-                // screen with it.
-                //
-                // The minimum is where it stops giving way to the log: below it
-                // the installation list cuts the abbreviated keys it shows.
-                Layout.preferredWidth: 520
-                Layout.maximumWidth: 520
-                Layout.minimumWidth: 320
-                Layout.fillHeight: true
-                // This column runs past a 768-high window, and a bar hidden at
-                // rest leaves its last sentence reading as cut rather than
-                // scrollable. Pinned only where there is something to scroll.
-                ScrollBar.vertical.policy: leftScroller.ScrollBar.vertical.size < 1
-                                           ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
-
-                ColumnLayout {
-                    width: leftScroller.availableWidth
-                    spacing: Theme.spacing.medium
-
-                    ProfileSection {
-                        Layout.fillWidth: true
-                        store: store
-                        onRenameRequested: {
-                            displayNameSheet.open()
-                            displayNameSheet.reset()
-                        }
-                    }
-
-                    ChatSection {
-                        Layout.fillWidth: true
-                        store: store
-                        selectedIndex: view.selectedIndex
-                        onAddRequested: {
-                            addInstallationSheet.open()
-                            addInstallationSheet.reset()
-                        }
-                        onSelected: (index) => view.selectedIndex = index
-                    }
-
-                    OtherContexts {
-                        Layout.fillWidth: true
-                        visible: store.otherEntries.length > 0
-                        store: store
-                    }
-
-                    ReadingNotes {
-                        Layout.fillWidth: true
-                        store: store
-                    }
-
-                    Item { Layout.fillHeight: true }
-                }
-            }
-
-            LogPanel {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
                 store: store
-                selectedIndex: view.selectedIndex
-                firstNewIndex: store.backend ? store.backend.firstNewIndex : -1
-                onSelected: (index) => view.selectedIndex = index
-                // Read first, so the preview is of what the store holds now: an
-                // edit another device already wrote drops out of it.
-                onPublishRequested: {
-                    // Nothing can be signed until the key is open, so that
-                    // is asked for first and Publish pressed again after.
-                    if (store.locked) {
-                        unlockSheet.open()
-                        unlockSheet.reset()
-                        return
+                onAddAccountRequested: view.screen = "add"
+                onObserveAccountRequested: {
+                    observeAccountSheet.open()
+                    observeAccountSheet.reset()
+                }
+                onUnlockRequested: {
+                    unlockSheet.open()
+                    unlockSheet.reset()
+                }
+                onExportRequested: {
+                    exportKeySheet.open()
+                    exportKeySheet.reset()
+                }
+                onForgetRequested: forgetAccountSheet.open()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: Theme.spacing.large
+
+                LogosScrollView {
+                    id: leftScroller
+                    Layout.fillWidth: true
+                    // The maximum is what actually holds the column at this width:
+                    // it fills, and without a cap it takes the log's half of the
+                    // screen with it.
+                    //
+                    // The minimum is where it stops giving way to the log: below it
+                    // the installation list cuts the abbreviated keys it shows.
+                    Layout.preferredWidth: 520
+                    Layout.maximumWidth: 520
+                    Layout.minimumWidth: 320
+                    Layout.fillHeight: true
+                    // This column runs past a 768-high window, and a bar hidden at
+                    // rest leaves its last sentence reading as cut rather than
+                    // scrollable. Pinned only where there is something to scroll.
+                    ScrollBar.vertical.policy: leftScroller.ScrollBar.vertical.size < 1
+                                               ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+
+                    ColumnLayout {
+                        width: leftScroller.availableWidth
+                        spacing: Theme.spacing.medium
+
+                        ProfileSection {
+                            Layout.fillWidth: true
+                            store: store
+                            onRenameRequested: {
+                                displayNameSheet.open()
+                                displayNameSheet.reset()
+                            }
+                        }
+
+                        ChatSection {
+                            Layout.fillWidth: true
+                            store: store
+                            selectedIndex: view.selectedIndex
+                            onAddRequested: {
+                                addInstallationSheet.open()
+                                addInstallationSheet.reset()
+                            }
+                            onSelected: (index) => view.selectedIndex = index
+                        }
+
+                        OtherContexts {
+                            Layout.fillWidth: true
+                            visible: store.otherEntries.length > 0
+                            store: store
+                        }
+
+                        ReadingNotes {
+                            Layout.fillWidth: true
+                            store: store
+                        }
+
+                        Item { Layout.fillHeight: true }
                     }
-                    // What the sheet's read finds is said again inside the
-                    // sheet, so a notice from before it must not be.
-                    store.backend.dismissNotice()
-                    store.backend.refresh()
-                    publishSheet.open()
-                    publishSheet.reset()
+                }
+
+                LogPanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    store: store
+                    selectedIndex: view.selectedIndex
+                    firstNewIndex: store.backend ? store.backend.firstNewIndex : -1
+                    onSelected: (index) => view.selectedIndex = index
+                    // Read first, so the preview is of what the store holds now: an
+                    // edit another device already wrote drops out of it.
+                    onPublishRequested: {
+                        // Nothing can be signed until the key is open, so that
+                        // is asked for first and Publish pressed again after.
+                        if (store.locked) {
+                            unlockSheet.open()
+                            unlockSheet.reset()
+                            return
+                        }
+                        // What the sheet's read finds is said again inside the
+                        // sheet, so a notice from before it must not be.
+                        store.backend.dismissNotice()
+                        store.backend.refresh()
+                        publishSheet.open()
+                        publishSheet.reset()
+                    }
                 }
             }
         }

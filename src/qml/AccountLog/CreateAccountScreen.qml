@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
 import Logos.Theme
@@ -7,12 +8,18 @@ import Logos.Controls
 // Make a key on this computer. The password is optional per account, and the
 // warning changes with it, because the two choices carry different risks and
 // only one of them can be undone.
-Item {
+LogosScrollView {
     property var store: null
 
     signal cancelled()
 
     id: root
+    // Taller than the screen, the panel scrolls rather than lose its ends,
+    // and the bar stays up so the cut reads as a scroll. The range is the
+    // panel's alone: one that reads the view's size is a binding loop.
+    contentHeight: panel.implicitHeight + 48
+    ScrollBar.vertical.policy: root.ScrollBar.vertical.size < 1
+                               ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
     // A click makes the checkbox write its own `checked`, so the box is where
     // this choice lives and the screen reads it from there.
@@ -52,7 +59,9 @@ Item {
     }
 
     Panel {
-        anchors.centerIn: parent
+        id: panel
+        x: (parent.width - width) / 2
+        y: Math.max(24, (root.availableHeight - height) / 2)
         width: Math.min(640, parent.width - 48)
         padding: Theme.spacing.xxlarge
         horizontalPadding: Theme.spacing.xxlarge
