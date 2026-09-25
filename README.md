@@ -9,8 +9,7 @@ held elsewhere.
 
 ## Install
 
-In Logos Basecamp 0.3.0 or later, open **Applications** and install
-**Account Log**.
+In Logos Basecamp 0.3.0, open **Applications** and install **Account Log**.
 
 ## What it does
 
