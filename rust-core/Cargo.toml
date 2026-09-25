@@ -1,6 +1,6 @@
 [package]
 name = "logos_account_core"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "The account write path as a linkable library: keys in a vault, the log they sign, and the store it is published to."
 license = "MIT OR Apache-2.0"
