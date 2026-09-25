@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 import Logos.Theme
@@ -83,8 +82,10 @@ Rectangle {
             color: Theme.palette.textSecondary
 
             HoverHandler { id: sayHover }
-            ToolTip.visible: sayHover.hovered && root.problem !== ""
-            ToolTip.text: root.problem
+            LogosToolTip {
+                text: root.problem
+                visible: sayHover.hovered && root.problem !== ""
+            }
         }
 
         // Always here: reading the store back is the whole of what can be done
