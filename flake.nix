@@ -37,7 +37,7 @@
         let pkgs = common.mkPkgs system;
         in pkgs.rustPlatform.buildRustPackage {
           pname = "logos-account-core";
-          version = "0.1.0";
+          version = "0.3.0";
 
           # Never copy a local `target/` into the store: it is hundreds of MB of
           # build cache, and nix path: sources do not honour .gitignore.
