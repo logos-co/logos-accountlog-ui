@@ -1,9 +1,9 @@
 #include "AccountLogBackend.h"
 
-#include <QDebug>
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLoggingCategory>
 #include <QMetaObject>
 #include <QStandardPaths>
 #include <QTime>
@@ -12,6 +12,9 @@
 #include "account_core.h"
 
 namespace {
+
+// Quiet below warnings: every failure it logs is already on screen.
+Q_LOGGING_CATEGORY(lcBackend, "accountlog_ui", QtWarningMsg)
 
 /// Parse a reply and release it. Every library call returns JSON with an `ok`
 /// field, so a null or unparseable reply is itself reported as a failed one
@@ -538,14 +541,16 @@ void AccountLogBackend::setNotice(const QString &kind, const QString &title, con
 
 void AccountLogBackend::report(const QString &what, const QString &message)
 {
-    // A sheet or a screen shows its own call's failure. The two edits made
-    // from a button on the log have nowhere else to say it.
+    // A sheet or a screen shows its own call's failure. The calls made from
+    // a button on the log or the account bar have nowhere else to say it.
     if (what == QLatin1String("stageRevoke")) {
         setNotice(QStringLiteral("error"), QStringLiteral("Could not stage the removal"), message);
     } else if (what == QLatin1String("discardPending")) {
         setNotice(QStringLiteral("error"), QStringLiteral("Could not discard the pending entries"),
                   message);
+    } else if (what == QLatin1String("stopObserving")) {
+        setNotice(QStringLiteral("error"), QStringLiteral("Could not stop observing"), message);
     }
-    qWarning().noquote() << "accountlog_ui:" << what << "failed:" << message;
+    qCDebug(lcBackend).noquote() << what << "failed:" << message;
     emit failed(what, message);
 }
