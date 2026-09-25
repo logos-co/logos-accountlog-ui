@@ -10,11 +10,12 @@ import Logos.Controls
 // wrong about.
 //
 // The scrim covers the plugin area only, and swallows every click behind it.
+// The keyboard is kept off the page behind by whoever lays the sheet over it.
 //
 // A sheet that makes a backend call stays up until the call lands, and says
 // beside its buttons why it did not: the person can fix what they typed rather
 // than find the failure somewhere else once the sheet has gone.
-Item {
+FocusScope {
     property string title: ""
     property string confirmText: qsTr("Confirm")
     property bool confirmEnabled: true
@@ -35,6 +36,12 @@ Item {
     // Where focus was as the sheet opened. A hidden button keeps focus, and
     // Space or Return would press it again, so it goes back as the sheet closes.
     property Item returnFocus: null
+    // The field this sheet asks for, if any: focused as the sheet opens, and
+    // again once a refusal lands, so the answer can be typed again.
+    property Item input: null
+    // A confirm that cannot be undone takes a press on its button, not a
+    // Return, which the sheet hears from the moment it opens.
+    property bool destructive: false
 
     signal confirmed()
     signal cancelled()
@@ -50,17 +57,25 @@ Item {
         awaiting = ""
         returnFocus = root.Window.activeFocusItem
         visible = true
-        panel.forceActiveFocus()
+        takeFocus()
     }
 
     function close() {
         awaiting = ""
+        // A sheet opened over this one has the focus, and keeps it.
+        const holding = root.activeFocus
         visible = false
-        if (returnFocus && returnFocus.visible && returnFocus.enabled)
+        if (holding && returnFocus && returnFocus.visible && returnFocus.enabled)
             returnFocus.forceActiveFocus()
-        else
+        else if (holding)
             root.parent.forceActiveFocus()
         returnFocus = null
+    }
+
+    // The field, or else the first control: not the scope, whose focus would
+    // go back to whichever button last had it.
+    function takeFocus() {
+        (root.input ? root.input : head.nextItemInFocusChain(true)).forceActiveFocus()
     }
 
     // Say which backend call the confirm just made, before making it.
@@ -91,7 +106,26 @@ Item {
                 return
             root.awaiting = ""
             root.problem = message
+            // A confirm clicked is disabled while its call runs, which takes
+            // the focus off it.
+            root.takeFocus()
         }
+    }
+
+    // A call once made runs to its end, so nothing closes the sheet while it
+    // does: its outcome would land with nothing left to show it.
+    Keys.onEscapePressed: if (root.awaiting === "") root.cancelled()
+    // A field takes Return first; anywhere else in the sheet it confirms.
+    Keys.onReturnPressed: if (!root.destructive) root.submit()
+    Keys.onEnterPressed: if (!root.destructive) root.submit()
+
+    // Tab past the last control, or Shift+Tab past the first, lands on one of
+    // these and goes round to the other end. A window embedded in a host does
+    // not wrap its tab chain: it hands the focus to the host instead.
+    Item {
+        id: head
+        activeFocusOnTab: true
+        onActiveFocusChanged: if (activeFocus) tail.nextItemInFocusChain(false).forceActiveFocus(Qt.BacktabFocusReason)
     }
 
     Rectangle {
@@ -118,14 +152,6 @@ Item {
 
         // Clicks on the sheet itself must not reach the scrim behind it.
         MouseArea { anchors.fill: parent }
-
-        // A call once made runs to its end, so nothing closes the sheet while
-        // it does: its outcome would land with nothing left to show it.
-        Keys.onEscapePressed: if (root.awaiting === "") root.cancelled()
-        // A field takes Return first, so this is a sheet with nothing focused
-        // that would.
-        Keys.onReturnPressed: root.submit()
-        Keys.onEnterPressed: root.submit()
 
         ColumnLayout {
             id: column
@@ -194,5 +220,11 @@ Item {
                 }
             }
         }
+    }
+
+    Item {
+        id: tail
+        activeFocusOnTab: true
+        onActiveFocusChanged: if (activeFocus) head.nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason)
     }
 }

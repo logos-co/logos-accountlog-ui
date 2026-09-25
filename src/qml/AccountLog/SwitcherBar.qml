@@ -117,6 +117,8 @@ Item {
         // click on it is left to the toggle above rather than closing here and
         // reopening there.
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        // Escape reaches a popup only while it holds the focus.
+        focus: true
 
         background: Rectangle {
             color: Theme.palette.backgroundSecondary

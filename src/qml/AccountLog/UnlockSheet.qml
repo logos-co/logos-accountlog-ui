@@ -17,10 +17,10 @@ Sheet {
     confirmText: qsTr("Unlock")
     confirmEnabled: password.text.length > 0
     backend: root.store.backend
+    input: password.field
 
     function reset() {
         password.text = ""
-        password.field.forceActiveFocus()
     }
 
     // The password is cleared once it is sent: a refusal asks for it again.

@@ -17,6 +17,7 @@ Sheet {
     confirmEnabled: root.bytes > 0 && root.bytes <= root.limit && !root.unchanged
                     && root.moving === 0
     backend: root.store.backend
+    input: field.field
 
     readonly property int limit: 64
     readonly property string name: field.text.trim()
@@ -32,7 +33,6 @@ Sheet {
 
     function reset() {
         field.text = root.store.displayName
-        field.field.forceActiveFocus()
     }
 
     onConfirmed: {

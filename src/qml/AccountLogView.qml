@@ -67,6 +67,13 @@ Item {
     // has none.
     readonly property bool usable: store.ready && store.vaultProblem === ""
 
+    // The page behind a sheet is out of the keyboard's reach, as the scrim
+    // puts it out of the mouse's.
+    readonly property bool sheetUp: addInstallationSheet.visible || displayNameSheet.visible
+                                    || publishSheet.visible || unlockSheet.visible
+                                    || exportKeySheet.visible || exportedKeySheet.visible
+                                    || forgetAccountSheet.visible || observeAccountSheet.visible
+
     Connections {
         target: store.backend
         ignoreUnknownSignals: true
@@ -75,6 +82,9 @@ Item {
             exportedKeySheet.address = address
             exportedKeySheet.key = key
             exportedKeySheet.open()
+            // Over the password sheet, which closes once this call lands: the
+            // key goes back to where that one was opened from.
+            exportedKeySheet.returnFocus = exportKeySheet.returnFocus
         }
 
         function onSelectedAddressChanged() {
@@ -120,6 +130,7 @@ Item {
         anchors.centerIn: parent
         width: Math.min(parent.width - 2 * Theme.spacing.large, 560)
         visible: store.ready && store.vaultProblem !== ""
+        enabled: !view.sheetUp
         spacing: Theme.spacing.medium
 
         LogosText {
@@ -152,6 +163,7 @@ Item {
         objectName: "addAccountScreen"
         anchors.fill: parent
         visible: view.usable && view.activeScreen === "add"
+        enabled: !view.sheetUp
         canCancel: view.hasAccounts
         onCreateRequested: {
             createScreen.reset()
@@ -173,6 +185,7 @@ Item {
         objectName: "createAccountScreen"
         anchors.fill: parent
         visible: view.usable && view.activeScreen === "create"
+        enabled: !view.sheetUp
         store: store
         onCancelled: view.screen = "add"
     }
@@ -181,6 +194,7 @@ Item {
         id: importScreen
         anchors.fill: parent
         visible: view.usable && view.activeScreen === "import"
+        enabled: !view.sheetUp
         store: store
         onCancelled: view.screen = "add"
     }
@@ -190,6 +204,7 @@ Item {
         anchors.fill: parent
         anchors.margins: Theme.spacing.large
         visible: view.usable && view.activeScreen === "manage" && view.hasAccounts
+        enabled: !view.sheetUp
         spacing: Theme.spacing.medium
 
         // Above both columns, so the account stays put while the sections

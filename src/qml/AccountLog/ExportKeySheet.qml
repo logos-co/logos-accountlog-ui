@@ -15,11 +15,10 @@ Sheet {
     confirmText: qsTr("Show the key")
     confirmEnabled: !root.store.isProtected || password.text.length > 0
     backend: root.store.backend
+    input: root.store.isProtected ? password.field : null
 
     function reset() {
         password.text = ""
-        if (root.store.isProtected)
-            password.field.forceActiveFocus()
     }
 
     onConfirmed: {

@@ -15,6 +15,7 @@ Sheet {
     confirmText: qsTr("Add installation")
     confirmEnabled: root.valid && !root.live && root.stagedAs < 0 && root.problem === ""
     backend: root.store.backend
+    input: field.field
 
     readonly property string key: Fmt.hex(field.text)
     readonly property bool valid: /^[0-9a-f]{64}$/.test(root.key)
@@ -34,7 +35,6 @@ Sheet {
 
     function reset() {
         field.text = ""
-        field.field.forceActiveFocus()
     }
 
     onConfirmed: {

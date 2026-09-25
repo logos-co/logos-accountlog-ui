@@ -20,6 +20,7 @@ Sheet {
     confirmText: root.held ? qsTr("Open it") : qsTr("Observe")
     confirmEnabled: root.valid && root.problem === ""
     backend: root.store.backend
+    input: field.field
 
     readonly property string addr: Fmt.hex(field.text)
     readonly property bool valid: /^[0-9a-f]{64}$/.test(root.addr)
@@ -35,7 +36,6 @@ Sheet {
 
     function reset() {
         field.text = ""
-        field.field.forceActiveFocus()
     }
 
     onConfirmed: {
