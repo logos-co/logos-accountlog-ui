@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
 import Logos.Theme
@@ -6,7 +7,7 @@ import Logos.Controls
 
 // The three ways an account gets onto this screen, side by side: make a key,
 // take custody of one made elsewhere, or take an address and only read it.
-Item {
+LogosScrollView {
     property bool canCancel: false
 
     signal createRequested()
@@ -15,9 +16,17 @@ Item {
     signal cancelled()
 
     id: root
+    // Taller than the screen, the panel scrolls rather than lose its ends,
+    // and the bar stays up so the cut reads as a scroll. The range is the
+    // panel's alone: one that reads the view's size is a binding loop.
+    contentHeight: panel.implicitHeight + 48
+    ScrollBar.vertical.policy: root.ScrollBar.vertical.size < 1
+                               ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
     Panel {
-        anchors.centerIn: parent
+        id: panel
+        x: (parent.width - width) / 2
+        y: Math.max(24, (root.availableHeight - height) / 2)
         width: Math.min(1040, parent.width - 48)
         padding: Theme.spacing.xxlarge
         horizontalPadding: Theme.spacing.xxlarge

@@ -16,6 +16,9 @@ Rectangle {
     border.color: Theme.palette.border
     radius: Theme.spacing.radiusLarge
     implicitHeight: body.implicitHeight + root.padding * 2
+    // What its content needs, so a layout does not squeeze it past its border.
+    Layout.minimumWidth: body.Layout.minimumWidth + root.horizontalPadding * 2
+    Layout.minimumHeight: body.Layout.minimumHeight + root.padding * 2
 
     ColumnLayout {
         id: body

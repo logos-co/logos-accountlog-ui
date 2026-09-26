@@ -14,6 +14,7 @@ Sheet {
            ? qsTr("Forget %1?").arg(root.store.displayName)
            : qsTr("Forget this account?")
     confirmText: qsTr("Forget account")
+    destructive: true
     backend: root.store.backend
 
     onConfirmed: {

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 import Logos.Theme
@@ -79,13 +78,12 @@ Rectangle {
             text: qsTr("Pending removal")
         }
         LogosIconButton {
+            id: trash
             Layout.alignment: Qt.AlignVCenter
             visible: root.removable && !root.pending && !root.leaving
             // The key beside it is what the row is about, and a labelled
             // button here would be wider than the key.
             Accessible.name: qsTr("Remove this installation")
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("Remove this installation")
             iconSource: LogosIcons.trash
             iconColor: Theme.palette.textTertiary
             size: 32
@@ -95,6 +93,11 @@ Rectangle {
             onClicked: {
                 root.forceActiveFocus()
                 root.removeRequested()
+            }
+
+            LogosToolTip {
+                text: qsTr("Remove this installation")
+                visible: trash.hovered
             }
         }
     }
